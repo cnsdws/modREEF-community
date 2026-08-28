@@ -1,0 +1,26 @@
+{
+  "name": "@modreef/equipment",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modreef/digital-twin": "workspace:*",
+    "@modreef/foundation": "workspace:*",
+    "@modreef/hal": "workspace:*"
+  },
+  "devDependencies": {
+    "@modreef/driver-simulator": "workspace:*",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.7"
+  }
+}

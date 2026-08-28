@@ -1,0 +1,48 @@
+{
+  "name": "@modreef/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "dev": "expo start",
+    "web": "expo start --web",
+    "ios": "expo run:ios",
+    "android": "expo run:android",
+    "export:web": "expo export --platform web",
+    "serve:web": "node scripts/serve-web.mjs",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf .expo dist"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "^56.0.17",
+    "@modreef/api-contract": "workspace:*",
+    "@modreef/cloud-client": "workspace:*",
+    "@modreef/digital-twin": "workspace:*",
+    "@modreef/foundation": "workspace:*",
+    "@modreef/onboarding": "workspace:*",
+    "expo": "^56.0.16",
+    "expo-auth-session": "~56.0.15",
+    "expo-camera": "~56.0.8",
+    "expo-crypto": "~56.0.4",
+    "expo-dev-client": "~56.0.23",
+    "expo-local-authentication": "~56.0.5",
+    "expo-secure-store": "~56.0.4",
+    "expo-web-browser": "~56.0.5",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.85.3",
+    "react-native-ble-manager": "^12.5.1",
+    "react-native-gesture-handler": "~2.31.2",
+    "react-native-web": "^0.21.0",
+    "react-native-zeroconf": "0.14.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.0"
+  }
+}

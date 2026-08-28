@@ -1,0 +1,20 @@
+appId: com.modreef.app
+name: Dashboard and journal smoke test
+tags:
+  - smoke
+  - journal
+---
+- launchApp:
+    stopApp: true
+    clearState: false
+- extendedWaitUntil:
+    visible: "Equipment.*"
+    timeout: 20000
+- tapOn: "Journal"
+- extendedWaitUntil:
+    visible: "Reef Journal"
+    timeout: 10000
+- assertNotVisible: "Journal failed to load"
+- tapOn:
+    id: "Close Reef Journal"
+- assertVisible: "Equipment.*"

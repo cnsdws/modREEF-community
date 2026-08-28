@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: modreef
+      POSTGRES_USER: modreef
+      POSTGRES_PASSWORD: local-development-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U modreef -d modreef"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - modreef-postgres:/var/lib/postgresql/data
+
+  cloud-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile.cloud
+    environment:
+      PORT: "3001"
+      MODREEF_DATABASE_URL: postgresql://modreef:local-development-only@postgres:5432/modreef
+      MODREEF_OIDC_ISSUER: https://identity.example.invalid
+      MODREEF_OIDC_AUDIENCE: https://api.modreef.local
+      MODREEF_ALLOWED_ORIGINS: http://localhost:8081,http://localhost:19006
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    restart: unless-stopped
+
+volumes:
+  modreef-postgres:

@@ -1,0 +1,40 @@
+{
+  "name": "@modreef/edge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --no-file-parallelism",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@matter/main": "^0.17.6",
+    "@matter/nodejs": "^0.17.6",
+    "@matter/nodejs-ble": "^0.17.6",
+    "@modreef/api-contract": "workspace:*",
+    "@modreef/automation": "workspace:*",
+    "@modreef/digital-twin": "workspace:*",
+    "@modreef/discovery": "workspace:*",
+    "@modreef/driver-ghome-wp12": "workspace:*",
+    "@modreef/driver-jebao-md44": "workspace:*",
+    "@modreef/driver-jebao-mdp": "workspace:*",
+    "@modreef/equipment": "workspace:*",
+    "@modreef/hal": "workspace:*",
+    "@modreef/inspection": "workspace:*",
+    "@modreef/onboarding": "workspace:*",
+    "@modreef/storage-sqlite": "workspace:*",
+    "@project-chip/matter.js": "^0.17.6",
+    "@stoprocent/bleno": "^0.12.5",
+    "@stoprocent/noble": "^2.5.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.7"
+  }
+}

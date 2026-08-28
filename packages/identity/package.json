@@ -1,0 +1,23 @@
+{
+  "name": "@modreef/identity",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modreef/discovery": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.7",
+    "@types/node": "^22.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

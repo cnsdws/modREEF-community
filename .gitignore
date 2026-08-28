@@ -1,0 +1,36 @@
+
+node_modules/
+.turbo/
+.expo/
+dist/
+coverage/
+*.tsbuildinfo
+.DS_Store
+
+# Local device credentials
+.env.local
+
+# Tuya credentials and discovery snapshots
+devices.json
+snapshot.json
+tinytuya.json
+tuya-raw.json
+
+# Local Edge runtime data
+.data/
+*.db
+*.db-shm
+*.db-wal
+
+# Expo generated native projects
+apps/mobile/ios/
+apps/mobile/android/
+.env.edge.local
+.env.tuya.local
+
+# Local factory SD-card masters
+artifacts/factory-images/
+artifacts/factory-labels/
+output/pdf/
+tmp/pdfs/
+__pycache__/

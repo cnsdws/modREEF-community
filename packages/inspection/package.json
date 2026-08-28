@@ -1,0 +1,25 @@
+{
+  "name": "@modreef/inspection",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modreef/discovery": "workspace:*",
+    "@modreef/identity": "workspace:*",
+    "@modreef/qualification": "workspace:*",
+    "@modreef/protocol-tuya": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.7"
+  }
+}

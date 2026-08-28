@@ -1,0 +1,11 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">modREEF Reef Controller on %h</name>
+  <service>
+    <type>_modreef._tcp</type>
+    <port>3000</port>
+    <txt-record>path=/health</txt-record>
+    <txt-record>product=reef-controller</txt-record>
+  </service>
+</service-group>

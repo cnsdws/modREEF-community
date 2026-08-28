@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for an authenticated modREEF update request
+
+[Path]
+PathExists=/var/lib/modreef/update.request
+Unit=modreef-update.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,122 @@
+name: Controller image
+
+on:
+  push:
+    tags:
+      - controller-v*
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact qualified commit SHA to image
+        required: true
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    name: Build Raspberry Pi controller image
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      SOURCE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          fetch-depth: 1
+      - name: Verify exact source
+        run: test "$(git rev-parse HEAD)" = "${SOURCE_COMMIT}"
+      - name: Require public repository for a public controller release
+        if: startsWith(github.ref, 'refs/tags/controller-v')
+        run: test "${{ github.event.repository.private }}" = "false"
+      - name: Reclaim hosted runner disk
+        run: |
+          df -h /
+          sudo rm -rf -- \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /usr/local/lib/android \
+            /usr/share/dotnet
+          docker system prune --all --force --volumes
+          modreef_available_kb="$(df --output=avail / | tail -n 1 | tr -d ' ')"
+          modreef_required_kb="$((30 * 1024 * 1024))"
+          if (( modreef_available_kb < modreef_required_kb )); then
+            echo "Controller image build requires at least 30 GiB free; found $((modreef_available_kb / 1024 / 1024)) GiB." >&2
+            exit 1
+          fi
+          df -h /
+      - name: Install ARM image build support
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user
+          sudo modprobe binfmt_misc
+      - name: Register ARM64 container emulation
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+          reset: true
+      - name: Build community controller image
+        env:
+          MODREEF_IMAGE_SOURCE_COMMIT: ${{ env.SOURCE_COMMIT }}
+        run: |
+          set -o pipefail
+          bash scripts/build-community-image.sh artifacts/controller-image 2>&1 \
+            | tee "${RUNNER_TEMP}/controller-image-build.log"
+      - name: Prepare failed-build diagnostics
+        if: failure()
+        run: |
+          mkdir -p artifacts/controller-image-diagnostics
+          sed -E \
+            -e "s/(FIRST_USER_PASS=')[^']*/\1[REDACTED]/" \
+            -e 's/(Authorization: (Bearer|Basic) )[A-Za-z0-9._~+\/-]+/\1[REDACTED]/Ig' \
+            "${RUNNER_TEMP}/controller-image-build.log" \
+            > artifacts/controller-image-diagnostics/build.log
+      - name: Upload failed-build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: modreef-controller-build-diagnostics-${{ env.SOURCE_COMMIT }}
+          path: artifacts/controller-image-diagnostics/build.log
+          if-no-files-found: error
+          retention-days: 7
+      - name: Add installation guide
+        run: |
+          cp docs/user-manual/install-community-controller.md artifacts/controller-image/INSTALL.md
+      - name: Generate public Raspberry Pi Imager manifest
+        if: startsWith(github.ref, 'refs/tags/controller-v')
+        env:
+          IMAGE_URL: https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/modreef-controller-community-arm64.img.xz
+        run: >-
+          node scripts/generate-imager-manifest.mjs
+          artifacts/controller-image/modreef-controller-community-arm64.img.xz
+          "${IMAGE_URL}"
+          artifacts/controller-image/modreef-controller.rpi-imager-manifest
+          "$(date -u +%F)"
+      - name: Verify artifact checksums
+        run: cd artifacts/controller-image && sha256sum --check *.sha256
+      - name: Upload verified community image
+        uses: actions/upload-artifact@v4
+        with:
+          name: modreef-controller-${{ env.SOURCE_COMMIT }}
+          path: artifacts/controller-image
+          if-no-files-found: error
+          retention-days: 30
+      - name: Attest public image provenance
+        if: github.event.repository.private == false
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: artifacts/controller-image/*.img.xz
+      - name: Publish public controller image release
+        if: startsWith(github.ref, 'refs/tags/controller-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          artifacts/controller-image/*
+          --verify-tag
+          --generate-notes
+          --latest
+          --title "modREEF Controller ${GITHUB_REF_NAME#controller-}"

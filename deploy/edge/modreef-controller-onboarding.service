@@ -1,0 +1,24 @@
+[Unit]
+Description=modREEF Factory Wi-Fi Onboarding
+After=bluetooth.service modreef-bluetooth.service NetworkManager.service
+Wants=bluetooth.service modreef-bluetooth.service NetworkManager.service
+ConditionPathExists=/var/lib/modreef/factory-identity.json
+ConditionPathExists=!/var/lib/modreef/wifi-provisioned
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/modreef/app/apps/edge
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/opt/modreef/app/apps/edge/node_modules/.bin/tsx src/controller-onboarding-service.ts
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/etc/NetworkManager/system-connections /var/lib/modreef
+
+[Install]
+WantedBy=multi-user.target

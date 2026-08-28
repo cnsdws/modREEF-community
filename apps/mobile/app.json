@@ -1,0 +1,78 @@
+{
+  "expo": {
+    "name": "modREEF",
+    "slug": "modreef",
+    "scheme": "modreef",
+    "version": "0.1.0",
+    "orientation": "default",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.modreef.app",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Allow modREEF to connect to your local aquarium controller.",
+        "NSBonjourServices": [
+          "_modreef._tcp."
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      },
+      "icon": "./assets/brand/modreef-app-icon.png"
+    },
+    "android": {
+      "permissions": [
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_WIFI_STATE",
+        "android.permission.CHANGE_WIFI_MULTICAST_STATE"
+      ],
+      "package": "com.modreef.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/brand/modreef-adaptive-foreground.png",
+        "backgroundColor": "#061528"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/brand/modreef-app-icon.png"
+    },
+    "plugins": [
+      "expo-dev-client",
+      [
+        "react-native-ble-manager",
+        {
+          "neverForLocation": true,
+          "isBleRequired": false,
+          "bluetoothAlwaysPermission": "Allow modREEF to discover and configure nearby aquarium equipment."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow modREEF to scan Matter setup codes."
+        }
+      ],
+      "./plugins/withTuyaIos",
+      "./plugins/withControllerDiscoveryIos",
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": true,
+          "faceIDPermission": "Allow modREEF to use Face ID to unlock your aquarium dashboard."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow modREEF to use Face ID to unlock your aquarium dashboard."
+        }
+      ]
+    ],
+    "icon": "./assets/brand/modreef-app-icon.png",
+    "splash": {
+      "image": "./assets/brand/modreef-splash-logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#061528"
+    }
+  }
+}

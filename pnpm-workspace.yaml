@@ -1,0 +1,14 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+allowBuilds:
+  '@serialport/bindings-cpp': true
+  '@stoprocent/bleno': false
+  '@stoprocent/bluetooth-hci-socket': true
+  '@stoprocent/noble': true
+  esbuild: true
+  usb: true
+
+patchedDependencies:
+  '@matter/nodejs-ble@0.17.6': patches/@matter__nodejs-ble@0.17.6.patch

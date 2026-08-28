@@ -1,0 +1,16 @@
+appId: com.modreef.app
+name: Equipment detail modal smoke test
+tags:
+  - smoke
+  - equipment
+---
+- launchApp:
+    stopApp: true
+    clearState: false
+- extendedWaitUntil:
+    visible: "Equipment.*"
+    timeout: 20000
+- tapOn: "Open details for .*"
+- assertVisible: "Close equipment detail"
+- tapOn: "Close equipment detail"
+- assertVisible: "Equipment.*"

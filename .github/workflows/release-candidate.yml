@@ -1,0 +1,67 @@
+name: Release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact tested commit SHA to qualify
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: Qualify immutable commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+      - name: Verify exact commit
+        run: test "$(git rev-parse HEAD)" = "${{ inputs.commit }}"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/verify-open-source-config.sh
+      - name: Install pinned Gitleaks
+        run: bash scripts/install-gitleaks.sh /tmp/modreef-tools/gitleaks
+      - name: Audit public source snapshot
+        env:
+          GITLEAKS_BINARY: /tmp/modreef-tools/gitleaks
+        run: bash scripts/audit-public-snapshot.sh HEAD
+      - name: Audit dependency license metadata
+        run: node scripts/audit-dependency-licenses.mjs
+      - run: pnpm test:factory
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm --filter @modreef/mobile export:web
+      - name: Build immutable Edge candidate
+        run: |
+          mkdir -p release-candidate
+          bash scripts/build-edge-release.sh release-candidate/modreef-edge-release.tar.gz
+          sha256sum release-candidate/modreef-edge-release.tar.gz | cut -d' ' -f1 > release-candidate/sha256.txt
+          git rev-parse HEAD > release-candidate/commit.txt
+          date -u +%FT%TZ > release-candidate/qualified-at.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ inputs.commit }}
+          path: release-candidate
+      - name: Publish candidate to the staging channel
+        env:
+          MODREEF_RELEASE_PUBLISH_TOKEN: ${{ secrets.MODREEF_RELEASE_PUBLISH_TOKEN }}
+        run: |
+          curl --fail --show-error --silent \
+            --request PUT \
+            --header "Authorization: Bearer ${MODREEF_RELEASE_PUBLISH_TOKEN}" \
+            --header "Content-Type: application/gzip" \
+            --header "X-modREEF-Release-SHA256: $(cat release-candidate/sha256.txt)" \
+            --header "X-modREEF-Source-Commit: $(cat release-candidate/commit.txt)" \
+            --data-binary @release-candidate/modreef-edge-release.tar.gz \
+            https://api.modreef.net/v1/releases/edge/staging

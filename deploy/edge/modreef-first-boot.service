@@ -1,0 +1,12 @@
+[Unit]
+Description=Initialize unique modREEF controller identity
+After=local-fs.target
+Before=modreef-update.service modreef-edge.service modreef-controller-onboarding.service
+ConditionPathExists=!/var/lib/modreef/factory-initialized
+
+[Service]
+Type=oneshot
+ExecStart=/opt/modreef/app/scripts/initialize-edge-first-boot.sh
+
+[Install]
+WantedBy=multi-user.target

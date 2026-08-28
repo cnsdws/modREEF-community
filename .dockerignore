@@ -1,0 +1,16 @@
+.git
+.github
+.data
+.expo
+.turbo
+**/.turbo
+**/node_modules
+node_modules
+coverage
+dist
+*.db
+*.db-shm
+*.db-wal
+.env*
+!.env.example
+docs

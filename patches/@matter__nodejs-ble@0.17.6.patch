@@ -1,0 +1,214 @@
+diff --git a/dist/cjs/NobleBleChannel.js b/dist/cjs/NobleBleChannel.js
+index 68c4bd19..73a88114 100644
+--- a/dist/cjs/NobleBleChannel.js
++++ b/dist/cjs/NobleBleChannel.js
+@@ -181,7 +181,9 @@ class NobleBleCentralInterface {
+         } else {
+           logger.info(`Peripheral ${peripheralAddress} disconnected while trying to connect, try again`);
+         }
+-        this.#openChannel(address, tryCount + 1).then(resolveOnce).catch(rejectOnce);
++        setTimeout(() => {
++          this.#openChannel(address, tryCount + 1).then(resolveOnce).catch(rejectOnce);
++        }, tryCount * 1500);
+       };
+       const connectHandler = async (error) => {
+         connectionGuard.connectTimeout.stop();
+diff --git a/dist/cjs/NobleBleClient.js b/dist/cjs/NobleBleClient.js
+index d057a30f..1066c6ff 100644
+--- a/dist/cjs/NobleBleClient.js
++++ b/dist/cjs/NobleBleClient.js
+@@ -32,6 +32,16 @@ var import_node_process = require("node:process");
+  */
+ const logger = import_general.Logger.get("NobleBleClient");
+ let noble;
++const additionalCommissioningServiceUuid = "8641";
++function modreefFallbackServiceData(peripheral) {
++  const configuredAddress = process.env.MODREEF_MATTER_BLE_ADDRESS?.toLowerCase();
++  if (!configuredAddress || (configuredAddress !== "*" && peripheral.address.toLowerCase() !== configuredAddress)) return void 0;
++  const discriminator = Number(process.env.MODREEF_MATTER_DISCRIMINATOR);
++  const vendorId = Number(process.env.MODREEF_MATTER_VENDOR_ID ?? 0);
++  const productId = Number(process.env.MODREEF_MATTER_PRODUCT_ID ?? 0);
++  if (!Number.isInteger(discriminator) || discriminator < 0 || discriminator > 65535) return void 0;
++  return import_general.Bytes.of([0, discriminator & 255, discriminator >> 8 & 255, vendorId & 255, vendorId >> 8 & 255, productId & 255, productId >> 8 & 255, 0]);
++}
+ function loadNoble(hciId) {
+   if (hciId !== void 0) {
+     process.env.NOBLE_HCI_DEVICE_ID = hciId.toString();
+@@ -85,7 +95,7 @@ class NobleBleClient {
+     this.shouldScan = true;
+     if (this.nobleState === "poweredOn") {
+       logger.debug("Start BLE scanning for Matter Services ...");
+-      await noble.startScanningAsync([import_protocol.MatterBle.SERVICE_UUID_SHORT], true);
++      await noble.startScanningAsync([import_protocol.MatterBle.SERVICE_UUID_SHORT, additionalCommissioningServiceUuid], true);
+     } else {
+       logger.debug("noble state is not poweredOn ... delay scanning till poweredOn");
+     }
+@@ -112,14 +122,14 @@ class NobleBleClient {
+       logger.debug(`Peripheral ${address} is not connectable ... ignoring`);
+       return;
+     }
+-    const matterServiceData = peripheral.advertisement.serviceData.find(
++    const advertisedMatterServiceData = peripheral.advertisement.serviceData.find(
+       ({ uuid }) => import_protocol.MatterBle.isServiceUuid(uuid)
+     );
+-    if (matterServiceData === void 0 || matterServiceData.data.length !== 8) {
++    const serviceDataBytes = advertisedMatterServiceData?.data.length === 8 ? import_general.Bytes.of(advertisedMatterServiceData.data) : modreefFallbackServiceData(peripheral);
++    if (serviceDataBytes === void 0) {
+       logger.info(`Peripheral ${address} does not advertise Matter Service ... ignoring`);
+       return;
+     }
+-    const serviceDataBytes = import_general.Bytes.of(matterServiceData.data);
+     this.discoveredPeripherals.set(address, { peripheral, matterServiceData: serviceDataBytes });
+     this.deviceDiscoveredCallback?.(peripheral, serviceDataBytes);
+   }
+diff --git a/dist/esm/NobleBleChannel.js b/dist/esm/NobleBleChannel.js
+index 43836672..63b00a30 100644
+--- a/dist/esm/NobleBleChannel.js
++++ b/dist/esm/NobleBleChannel.js
+@@ -177,7 +177,9 @@ class NobleBleCentralInterface {
+         } else {
+           logger.info(`Peripheral ${peripheralAddress} disconnected while trying to connect, try again`);
+         }
+-        this.#openChannel(address, tryCount + 1).then(resolveOnce).catch(rejectOnce);
++        setTimeout(() => {
++          this.#openChannel(address, tryCount + 1).then(resolveOnce).catch(rejectOnce);
++        }, tryCount * 1500);
+       };
+       const connectHandler = async (error) => {
+         connectionGuard.connectTimeout.stop();
+diff --git a/dist/esm/NobleBleClient.js b/dist/esm/NobleBleClient.js
+index 106f209d..2dec37ab 100644
+--- a/dist/esm/NobleBleClient.js
++++ b/dist/esm/NobleBleClient.js
+@@ -9,6 +9,16 @@ import { MatterBle } from "@matter/protocol";
+ import { platform } from "node:process";
+ const logger = Logger.get("NobleBleClient");
+ let noble;
++const additionalCommissioningServiceUuid = "8641";
++function modreefFallbackServiceData(peripheral) {
++  const configuredAddress = process.env.MODREEF_MATTER_BLE_ADDRESS?.toLowerCase();
++  if (!configuredAddress || (configuredAddress !== "*" && peripheral.address.toLowerCase() !== configuredAddress)) return void 0;
++  const discriminator = Number(process.env.MODREEF_MATTER_DISCRIMINATOR);
++  const vendorId = Number(process.env.MODREEF_MATTER_VENDOR_ID ?? 0);
++  const productId = Number(process.env.MODREEF_MATTER_PRODUCT_ID ?? 0);
++  if (!Number.isInteger(discriminator) || discriminator < 0 || discriminator > 65535) return void 0;
++  return Bytes.of([0, discriminator & 255, discriminator >> 8 & 255, vendorId & 255, vendorId >> 8 & 255, productId & 255, productId >> 8 & 255, 0]);
++}
+ function loadNoble(hciId) {
+   if (hciId !== void 0) {
+     process.env.NOBLE_HCI_DEVICE_ID = hciId.toString();
+@@ -62,7 +72,7 @@ class NobleBleClient {
+     this.shouldScan = true;
+     if (this.nobleState === "poweredOn") {
+       logger.debug("Start BLE scanning for Matter Services ...");
+-      await noble.startScanningAsync([MatterBle.SERVICE_UUID_SHORT], true);
++      await noble.startScanningAsync([MatterBle.SERVICE_UUID_SHORT, additionalCommissioningServiceUuid], true);
+     } else {
+       logger.debug("noble state is not poweredOn ... delay scanning till poweredOn");
+     }
+@@ -89,14 +99,14 @@ class NobleBleClient {
+       logger.debug(`Peripheral ${address} is not connectable ... ignoring`);
+       return;
+     }
+-    const matterServiceData = peripheral.advertisement.serviceData.find(
++    const advertisedMatterServiceData = peripheral.advertisement.serviceData.find(
+       ({ uuid }) => MatterBle.isServiceUuid(uuid)
+     );
+-    if (matterServiceData === void 0 || matterServiceData.data.length !== 8) {
++    const serviceDataBytes = advertisedMatterServiceData?.data.length === 8 ? Bytes.of(advertisedMatterServiceData.data) : modreefFallbackServiceData(peripheral);
++    if (serviceDataBytes === void 0) {
+       logger.info(`Peripheral ${address} does not advertise Matter Service ... ignoring`);
+       return;
+     }
+-    const serviceDataBytes = Bytes.of(matterServiceData.data);
+     this.discoveredPeripherals.set(address, { peripheral, matterServiceData: serviceDataBytes });
+     this.deviceDiscoveredCallback?.(peripheral, serviceDataBytes);
+   }
+diff --git a/src/NobleBleChannel.ts b/src/NobleBleChannel.ts
+index f1ba925e..9ef7dc82 100644
+--- a/src/NobleBleChannel.ts
++++ b/src/NobleBleChannel.ts
+@@ -236,10 +236,15 @@ export class NobleBleCentralInterface implements Transport {
+                     logger.info(`Peripheral ${peripheralAddress} disconnected while trying to connect, try again`);
+                 }
+ 
+-                // Try again and chain promises
+-                this.#openChannel(address, tryCount + 1)
+-                    .then(resolveOnce)
+-                    .catch(rejectOnce);
++                // Give the controller and peripheral time to return to an
++                // advertising/connectable state before retrying transient HCI
++                // failures. Immediate retries can exhaust all attempts in
++                // under two seconds on Linux controllers.
++                setTimeout(() => {
++                    this.#openChannel(address, tryCount + 1)
++                        .then(resolveOnce)
++                        .catch(rejectOnce);
++                }, tryCount * 1_500);
+             };
+ 
+             const connectHandler = async (error?: any) => {
+diff --git a/src/NobleBleClient.ts b/src/NobleBleClient.ts
+index aaeeb9fb..5609e145 100644
+--- a/src/NobleBleClient.ts
++++ b/src/NobleBleClient.ts
+@@ -14,6 +14,29 @@ import { BleOptions } from "./NodeJsBle.js";
+ const logger = Logger.get("NobleBleClient");
+ let noble: Noble;
+ 
++const additionalCommissioningServiceUuid = "8641";
++
++function modreefFallbackServiceData(peripheral: Peripheral): Bytes | undefined {
++    const configuredAddress = process.env.MODREEF_MATTER_BLE_ADDRESS?.toLowerCase();
++    if (!configuredAddress || (configuredAddress !== "*" && peripheral.address.toLowerCase() !== configuredAddress)) return undefined;
++
++    const discriminator = Number(process.env.MODREEF_MATTER_DISCRIMINATOR);
++    const vendorId = Number(process.env.MODREEF_MATTER_VENDOR_ID ?? 0);
++    const productId = Number(process.env.MODREEF_MATTER_PRODUCT_ID ?? 0);
++    if (!Number.isInteger(discriminator) || discriminator < 0 || discriminator > 0xffff) return undefined;
++
++    return Bytes.of([
++        0,
++        discriminator & 0xff,
++        (discriminator >> 8) & 0xff,
++        vendorId & 0xff,
++        (vendorId >> 8) & 0xff,
++        productId & 0xff,
++        (productId >> 8) & 0xff,
++        0,
++    ]);
++}
++
+ function loadNoble(hciId?: number) {
+     // load noble driver with the correct device selected
+     if (hciId !== undefined) {
+@@ -87,7 +110,7 @@ export class NobleBleClient {
+         this.shouldScan = true;
+         if (this.nobleState === "poweredOn") {
+             logger.debug("Start BLE scanning for Matter Services ...");
+-            await noble.startScanningAsync([MatterBle.SERVICE_UUID_SHORT], true);
++            await noble.startScanningAsync([MatterBle.SERVICE_UUID_SHORT, additionalCommissioningServiceUuid], true);
+         } else {
+             logger.debug("noble state is not poweredOn ... delay scanning till poweredOn");
+         }
+@@ -127,15 +150,17 @@ export class NobleBleClient {
+             logger.debug(`Peripheral ${address} is not connectable ... ignoring`);
+             return;
+         }
+-        const matterServiceData = peripheral.advertisement.serviceData.find(({ uuid }) =>
++        const advertisedMatterServiceData = peripheral.advertisement.serviceData.find(({ uuid }) =>
+             MatterBle.isServiceUuid(uuid),
+         );
+-        if (matterServiceData === undefined || matterServiceData.data.length !== 8) {
++        const serviceDataBytes = advertisedMatterServiceData?.data.length === 8
++            ? Bytes.of(advertisedMatterServiceData.data)
++            : modreefFallbackServiceData(peripheral);
++        if (serviceDataBytes === undefined) {
+             logger.info(`Peripheral ${address} does not advertise Matter Service ... ignoring`);
+             return;
+         }
+ 
+-        const serviceDataBytes = Bytes.of(matterServiceData.data);
+         this.discoveredPeripherals.set(address, { peripheral, matterServiceData: serviceDataBytes });
+ 
+         this.deviceDiscoveredCallback?.(peripheral, serviceDataBytes);

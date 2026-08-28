@@ -1,0 +1,40 @@
+FROM node:22-bookworm-slim
+
+ENV NODE_ENV=production
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@11.11.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
+COPY patches patches
+COPY apps/cloud-api/package.json apps/cloud-api/package.json
+COPY packages/api-contract/package.json packages/api-contract/package.json
+COPY packages/digital-twin/package.json packages/digital-twin/package.json
+COPY packages/foundation/package.json packages/foundation/package.json
+RUN pnpm install --frozen-lockfile --prod=false
+
+COPY apps/cloud-api apps/cloud-api
+COPY apps/mobile/assets/brand/modreef-wordmark-transparent.png apps/mobile/assets/brand/modreef-wordmark-transparent.png
+COPY apps/mobile/assets/brand/modreef-symbol-transparent.png apps/mobile/assets/brand/modreef-symbol-transparent.png
+COPY apps/mobile/assets/brand/modreef-logo.png apps/mobile/assets/brand/modreef-logo.png
+COPY packages/api-contract packages/api-contract
+COPY packages/digital-twin packages/digital-twin
+COPY packages/foundation packages/foundation
+
+# Publish the exact Edge source shipped by this qualified cloud image. Controllers
+# verify the archive checksum and never need GitHub credentials.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json /edge-release/
+COPY patches /edge-release/patches
+COPY apps/edge /edge-release/apps/edge
+COPY deploy /edge-release/deploy
+COPY scripts /edge-release/scripts
+COPY packages /edge-release/packages
+RUN bash -o pipefail -c \
+      "tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -C /edge-release . | gzip -n > /app/apps/cloud-api/edge-release.tar.gz" \
+ && sha256sum /app/apps/cloud-api/edge-release.tar.gz \
+    | cut -d' ' -f1 > /app/apps/cloud-api/edge-release.sha256
+
+RUN chown -R node:node /app
+USER node
+EXPOSE 3001
+CMD ["pnpm", "--filter", "@modreef/cloud-api", "start:production"]

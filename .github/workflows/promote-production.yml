@@ -1,0 +1,46 @@
+name: Promote production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full staging-tested commit SHA to promote
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    name: Promote tested staging commit
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+      - name: Verify exact commit
+        run: test "$(git rev-parse HEAD)" = "${{ inputs.commit }}"
+      - name: Verify commit is the published staging release
+        run: |
+          curl --fail --show-error --silent \
+            https://api.modreef.net/v1/releases/edge/staging/latest \
+            | node -e '
+              let body = "";
+              process.stdin.on("data", (chunk) => body += chunk);
+              process.stdin.on("end", () => {
+                const release = JSON.parse(body);
+                if (release.sourceCommit !== process.env.EXPECTED_COMMIT) process.exit(1);
+              });
+            '
+        env:
+          EXPECTED_COMMIT: ${{ inputs.commit }}
+      - name: Fast-forward the production branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api \
+            --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/git/refs/heads/production" \
+            -f sha="$(git rev-parse HEAD)" \
+            -F force=false

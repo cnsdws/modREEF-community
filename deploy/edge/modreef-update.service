@@ -1,0 +1,11 @@
+[Unit]
+Description=modREEF Qualified Release Check
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=MODREEF_UPDATE_STARTUP=1
+ExecStartPre=/usr/bin/rm -f /var/lib/modreef/update.request
+ExecStart=/opt/modreef/app/scripts/update-edge.sh
+TimeoutStartSec=5min

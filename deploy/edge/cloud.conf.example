@@ -1,0 +1,5 @@
+[Service]
+Environment="MODREEF_CLOUD_URL=https://api.modreef.net"
+Environment="MODREEF_EDGE_ID=replace-me"
+Environment="MODREEF_AQUARIUM_ID=replace-me"
+Environment="MODREEF_EDGE_TOKEN=replace-me"
