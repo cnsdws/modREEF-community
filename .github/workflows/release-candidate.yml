@@ -44,13 +44,13 @@ jobs:
       - run: pnpm --filter @modreef/mobile export:web
       - uses: docker/setup-buildx-action@v3
       - name: Build production Cloud API image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.cloud
           push: false
       - name: Build production web image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile.web
