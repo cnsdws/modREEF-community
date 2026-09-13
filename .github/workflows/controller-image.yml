@@ -23,7 +23,7 @@ jobs:
     env:
       SOURCE_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.SOURCE_COMMIT }}
           fetch-depth: 1
