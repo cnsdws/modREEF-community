@@ -9,6 +9,10 @@ UPLOAD_LINE="$(grep -n -m1 'name: Upload verified community image' "${WORKFLOW}"
 ATTEST_LINE="$(grep -n -m1 'name: Attest public image provenance' "${WORKFLOW}" | cut -d: -f1)"
 
 [[ -n "${UPLOAD_LINE}" && -n "${ATTEST_LINE}" && "${UPLOAD_LINE}" -lt "${ATTEST_LINE}" ]]
+grep -A2 'name: Upload verified community image' "${WORKFLOW}" \
+  | grep -Fq 'continue-on-error: true'
+grep -A8 'name: Upload verified community image' "${WORKFLOW}" \
+  | grep -Fq 'retention-days: 7'
 grep -A2 'name: Attest public image provenance' "${WORKFLOW}" \
   | grep -Fq 'if: github.event.repository.private == false'
 grep -A4 'name: Generate public Raspberry Pi Imager manifest' "${WORKFLOW}" \

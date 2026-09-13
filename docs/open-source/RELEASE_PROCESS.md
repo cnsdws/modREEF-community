@@ -28,7 +28,8 @@ candidate that was successfully published to staging.
    commit. The workflow publishes the result as a prerelease.
 3. The Controller image workflow builds and verifies the compressed image,
    checksum, Raspberry Pi Imager manifest, installation guide, and provenance
-   attestation.
+   attestation. Its seven-day GitHub Actions mirror is non-blocking because the
+   immutable release asset and attestation are the authoritative public copies.
 4. Flash the published artifact through Raspberry Pi Imager—not a local build—
    onto clean media for both Raspberry Pi 4 and Raspberry Pi 5 acceptance.
 5. Confirm first boot, discovery, claim, update, restart, backup, restore, and
