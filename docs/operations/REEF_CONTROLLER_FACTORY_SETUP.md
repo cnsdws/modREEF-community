@@ -100,9 +100,23 @@ destroying the old label and applying the replacement.
 sudo /opt/modreef/app/scripts/update-edge.sh
 ```
 
-The cloud publishes the exact Edge source included in its qualified production image. The updater downloads the release without GitHub credentials, verifies its SHA-256 checksum, preserves controller state under `/var/lib/modreef`, installs it, and runs the controller health check. A failed install or health check restores the previous source. A systemd timer checks daily, and startup checks are allowed to fail without preventing local control when the internet is unavailable.
+The qualified workflow signs the exact Edge archive with an offline-backed
+Ed25519 private key. The updater downloads releases without GitHub credentials,
+verifies both the SHA-256 checksum and signature against the trusted public key
+at `/etc/modreef/release-public-key.pem`, preserves controller state under
+`/var/lib/modreef`, installs the candidate, and runs the controller health
+check. A failed install or health check restores the previous source. A systemd
+timer checks daily, and an unavailable internet connection never prevents local
+control.
 
-The archive is checksum-verified but is not yet cryptographically signed. Add release signing before unattended customer updates leave prototype status.
+Create the key pair once with
+`scripts/generate-edge-release-signing-key.sh PRIVATE_KEY PUBLIC_KEY`. Keep the
+private key offline and set its PEM contents only in the protected GitHub secret
+`MODREEF_EDGE_RELEASE_SIGNING_KEY`. Bake the public key into controller images
+at `/etc/modreef/release-public-key.pem` and set
+`MODREEF_REQUIRE_SIGNED_RELEASES=1` after every supported installed image has a
+trusted key. Controllers with a trusted key always reject an absent or invalid
+signature.
 
 ### Staging a controller candidate
 
@@ -110,15 +124,16 @@ The release channel is stored per controller under durable controller state;
 it is not a global aquarium or account setting. Production is the default.
 From System settings, open the target controller's action menu and select
 **Staging**. The client confirms that the controller recorded the selection,
-then requests an update. The controller verifies
-the staging archive checksum, and reports both its channel and update status to
+then requests an update. The controller verifies the staging archive checksum
+and signature, and reports both its channel and update status to
 tablet and web. Select **Production** to return it to the qualified customer
 channel.
 
 Publishing requires the same high-entropy value in the Cloud API environment
 variable and GitHub Actions secret named `MODREEF_RELEASE_PUBLISH_TOKEN`. The
-Cloud API stores only the current staging archive and its immutable metadata in
-PostgreSQL. Public downloads do not expose the publication token.
+Cloud API stores the current signed staging and promoted production archives
+and their immutable metadata in PostgreSQL. Public downloads do not expose the
+publication token or signing key.
 
 There is one deliberate bootstrap step: controllers running a release from
 before channel selection existed cannot select staging remotely. Promote the

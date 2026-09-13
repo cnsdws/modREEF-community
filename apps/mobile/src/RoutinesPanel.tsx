@@ -9,29 +9,32 @@ import {
 } from "react-native";
 
 import { isMeasurementEquipment, type Equipment } from "@modreef/digital-twin";
+import type {
+  ActiveRoutineExecution,
+  RoutineDefinition,
+  RoutineTask,
+} from "@modreef/api-contract";
 
 import { CircularActionButton } from "./CircularActionButton";
 import {
-  createEdgeRoutine,
-  deleteEdgeRoutine,
-  finishEdgeRoutine,
-  getEdgeRoutines,
-  runEdgeRoutine,
-  stopEdgeRoutine,
-  updateEdgeRoutine,
-  type EdgeActiveRoutine,
-  type EdgeRoutineDefinition,
-  type EdgeRoutineTask,
-} from "./edgeClient";
+  createDashboardRoutine,
+  deleteDashboardRoutine,
+  finishDashboardRoutine,
+  getDashboardRoutines,
+  runDashboardRoutine,
+  stopDashboardRoutine,
+  updateDashboardRoutine,
+} from "./dashboardConnection";
 
 interface Props {
+  controllerId: string;
   equipment: Equipment[];
 }
 
 interface RoutineDraft {
   id?: string;
   name: string;
-  tasks: EdgeRoutineTask[];
+  tasks: RoutineTask[];
 }
 
 function taskId(): string {
@@ -39,7 +42,7 @@ function taskId(): string {
 }
 
 function taskSummary(
-  task: EdgeRoutineTask,
+  task: RoutineTask,
   equipment: Equipment[],
 ): string {
   if (task.type === "wait") {
@@ -64,7 +67,7 @@ function taskSummary(
   return `${task.enabled ? "Turn on" : "Turn off"} ${name}`;
 }
 
-export function RoutinesPanel({ equipment }: Props) {
+export function RoutinesPanel({ controllerId, equipment }: Props) {
   const powerEquipment = useMemo(
     () => equipment.filter((item) => !isMeasurementEquipment(item)),
     [equipment],
@@ -77,8 +80,8 @@ export function RoutinesPanel({ equipment }: Props) {
     ),
     [equipment],
   );
-  const [routines, setRoutines] = useState<EdgeRoutineDefinition[]>([]);
-  const [active, setActive] = useState<EdgeActiveRoutine | null>(null);
+  const [routines, setRoutines] = useState<RoutineDefinition[]>([]);
+  const [active, setActive] = useState<ActiveRoutineExecution | null>(null);
   const [draft, setDraft] = useState<RoutineDraft | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [equipmentMenuTaskId, setEquipmentMenuTaskId] = useState<string | null>(null);
@@ -88,21 +91,25 @@ export function RoutinesPanel({ equipment }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    const routineResult = await getEdgeRoutines();
-    setRoutines(routineResult.routines);
+    const routineResult = await getDashboardRoutines(controllerId);
+    setRoutines(routineResult.definitions);
     setActive(routineResult.active);
     setError(null);
   }
 
   useEffect(() => {
     let cancelled = false;
+    setDraft(null);
+    setAddMenuOpen(false);
+    setEquipmentMenuTaskId(null);
+    setDeleteConfirmId(null);
 
     async function poll() {
       try {
-        const routineResult = await getEdgeRoutines();
+        const routineResult = await getDashboardRoutines(controllerId);
 
         if (!cancelled) {
-          setRoutines(routineResult.routines);
+          setRoutines(routineResult.definitions);
           setActive(routineResult.active);
           setError(null);
         }
@@ -117,7 +124,7 @@ export function RoutinesPanel({ equipment }: Props) {
       cancelled = true;
       clearInterval(polling);
     };
-  }, []);
+  }, [controllerId]);
 
   async function perform(action: () => Promise<void>) {
     setBusy(true);
@@ -139,7 +146,7 @@ export function RoutinesPanel({ equipment }: Props) {
     setDeleteConfirmId(null);
   }
 
-  function editRoutine(routine: EdgeRoutineDefinition) {
+  function editRoutine(routine: RoutineDefinition) {
     setDraft({
       id: routine.id,
       name: routine.name,
@@ -159,7 +166,7 @@ export function RoutinesPanel({ equipment }: Props) {
   ) {
     if (!draft) return;
 
-    let task: EdgeRoutineTask;
+    let task: RoutineTask;
     if (type === "wait") {
       task = { id: taskId(), type: "wait", durationSeconds: 60 };
     } else if (type === "hold") {
@@ -205,7 +212,7 @@ export function RoutinesPanel({ equipment }: Props) {
     setAddMenuOpen(false);
   }
 
-  function updateTask(taskIdValue: string, next: EdgeRoutineTask) {
+  function updateTask(taskIdValue: string, next: RoutineTask) {
     if (!draft) return;
     setDraft({
       ...draft,
@@ -227,9 +234,9 @@ export function RoutinesPanel({ equipment }: Props) {
     await perform(async () => {
       const input = { name: draft.name, tasks: draft.tasks };
       if (draft.id) {
-        await updateEdgeRoutine(draft.id, input);
+        await updateDashboardRoutine(controllerId, draft.id, input);
       } else {
-        await createEdgeRoutine(input);
+        await createDashboardRoutine(controllerId, input);
       }
       setDraft(null);
       await refresh();
@@ -451,9 +458,9 @@ export function RoutinesPanel({ equipment }: Props) {
                 }
                 disabled={busy}
                 onPress={() => void perform(async () => {
-                  if (isHolding) await finishEdgeRoutine();
-                  else if (isActive) await stopEdgeRoutine();
-                  else await runEdgeRoutine(routine.id);
+                  if (isHolding) await finishDashboardRoutine(controllerId);
+                  else if (isActive) await stopDashboardRoutine(controllerId);
+                  else await runDashboardRoutine(controllerId, routine.id);
                   await refresh();
                 })}
                 style={[
@@ -478,7 +485,7 @@ export function RoutinesPanel({ equipment }: Props) {
                   return;
                 }
                 void perform(async () => {
-                  await deleteEdgeRoutine(routine.id);
+                  await deleteDashboardRoutine(controllerId, routine.id);
                   setDeleteConfirmId(null);
                   await refresh();
                 });

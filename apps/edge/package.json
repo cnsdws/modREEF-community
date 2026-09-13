@@ -12,24 +12,23 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@matter/main": "^0.17.6",
-    "@matter/nodejs": "^0.17.6",
-    "@matter/nodejs-ble": "^0.17.6",
     "@modreef/api-contract": "workspace:*",
     "@modreef/automation": "workspace:*",
     "@modreef/digital-twin": "workspace:*",
+    "@modreef/device-integrations": "workspace:*",
     "@modreef/discovery": "workspace:*",
     "@modreef/driver-ghome-wp12": "workspace:*",
+    "@modreef/driver-jebao-dmp": "workspace:*",
     "@modreef/driver-jebao-md44": "workspace:*",
     "@modreef/driver-jebao-mdp": "workspace:*",
+    "@modreef/driver-matter": "workspace:*",
+    "@modreef/driver-yinmik-water": "workspace:*",
     "@modreef/equipment": "workspace:*",
     "@modreef/hal": "workspace:*",
     "@modreef/inspection": "workspace:*",
     "@modreef/onboarding": "workspace:*",
     "@modreef/storage-sqlite": "workspace:*",
-    "@project-chip/matter.js": "^0.17.6",
-    "@stoprocent/bleno": "^0.12.5",
-    "@stoprocent/noble": "^2.5.9"
+    "@stoprocent/bleno": "^0.12.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

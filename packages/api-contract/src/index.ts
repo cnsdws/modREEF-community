@@ -6,7 +6,81 @@ export * from "./water-alarm-settings";
 
 export type CommandId = string;
 
-export type AquariumRole = "owner" | "admin" | "viewer";
+export const aquariumRoles = ["view", "control", "program", "manage", "owner"] as const;
+export type AquariumRole = typeof aquariumRoles[number];
+
+export const aquariumRoleCapabilities: Record<AquariumRole, {
+  control: boolean;
+  program: boolean;
+  manageUsers: boolean;
+  own: boolean;
+}> = {
+  view: { control: false, program: false, manageUsers: false, own: false },
+  control: { control: true, program: false, manageUsers: false, own: false },
+  program: { control: true, program: true, manageUsers: false, own: false },
+  manage: { control: true, program: true, manageUsers: true, own: false },
+  owner: { control: true, program: true, manageUsers: true, own: true },
+};
+
+export interface AquariumMember {
+  userId: string;
+  email: string | null;
+  role: AquariumRole;
+  receiveAlarms: boolean;
+  joinedAt: string;
+  currentUser?: boolean;
+  pending?: boolean;
+  invitedAt?: string | null;
+  acceptedAt?: string | null;
+  expiresAt?: string | null;
+}
+
+export type AuthorizationAuditAction =
+  | "member.invited"
+  | "member.invitation-resent"
+  | "member.accepted"
+  | "member.role-changed"
+  | "member.removed"
+  | "member.notification-changed"
+  | "ownership.transferred";
+
+export interface AuthorizationAuditEvent {
+  id: string;
+  aquariumId: string;
+  actorEmail: string | null;
+  targetEmail: string | null;
+  action: AuthorizationAuditAction;
+  details: Record<string, unknown>;
+  occurredAt: string;
+}
+
+export interface AquariumExport {
+  schemaVersion: "1";
+  exportedAt: string;
+  aquarium: AquariumSummary;
+  controllers: EdgeSummary[];
+  devices: CloudDeviceSnapshot[];
+  equipment: CloudEquipmentSnapshot[];
+  events: AquariumEvent[];
+  waterAlarmSettings: WaterAlarmSettings | null;
+  members: AquariumMember[];
+  authorizationAudit: AuthorizationAuditEvent[];
+}
+
+export interface AddAquariumMemberRequest {
+  email: string;
+  role: Exclude<AquariumRole, "owner">;
+  receiveAlarms?: boolean;
+}
+
+export interface UpdateAquariumMemberRequest {
+  role?: Exclude<AquariumRole, "owner">;
+  receiveAlarms?: boolean;
+}
+
+export function isAquariumRole(value: unknown): value is AquariumRole {
+  return typeof value === "string" && aquariumRoles.includes(value as AquariumRole);
+}
 
 export interface AquariumSummary {
   id: string;
@@ -44,9 +118,46 @@ export interface FeedCycleRuntimeState {
   recoveryEndsAt?: string;
 }
 
+export type RoutineTask =
+  | { id: string; type: "power"; equipmentId: string; enabled: boolean }
+  | { id: string; type: "wait"; durationSeconds: number }
+  | { id: string; type: "dose"; equipmentId: string; milliliters: number }
+  | { id: string; type: "restore" }
+  | { id: string; type: "hold" };
+
+export interface RoutineDefinition {
+  id: string;
+  name: string;
+  tasks: RoutineTask[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoutineDefinitionInput {
+  name: string;
+  tasks: RoutineTask[];
+}
+
+export interface ActiveRoutineExecution {
+  id: string;
+  routineId: string;
+  name: string;
+  startedAt: string;
+  taskIndex: number;
+  snapshots: Record<string, boolean>;
+  holding?: boolean;
+  resumeAt?: string;
+}
+
+export interface RoutineRuntimeState {
+  definitions: RoutineDefinition[];
+  active: ActiveRoutineExecution | null;
+}
+
 export interface EdgeRuntimeState {
   feedCycle: FeedCycleRuntimeState | null;
   controllerUpdate?: ControllerUpdateRuntimeState;
+  routines?: RoutineRuntimeState;
 }
 
 export interface ControllerUpdateRuntimeState {
@@ -209,6 +320,9 @@ export function isEdgeRuntimeState(value: unknown): value is EdgeRuntimeState {
       if (item[key] !== undefined && typeof item[key] !== "string") return false;
     }
   }
+  if (runtime.routines !== undefined && !isRoutineRuntimeState(runtime.routines)) {
+    return false;
+  }
   const feedCycle = runtime.feedCycle;
   if (feedCycle === null) return true;
   if (typeof feedCycle !== "object" || feedCycle === null) return false;
@@ -218,6 +332,55 @@ export function isEdgeRuntimeState(value: unknown): value is EdgeRuntimeState {
     typeof item.startedAt === "string" && typeof item.endsAt === "string" &&
     Number.isSafeInteger(item.durationSeconds) && Number(item.durationSeconds) > 0 &&
     (item.recoveryEndsAt === undefined || typeof item.recoveryEndsAt === "string");
+}
+
+function isRoutineTask(value: unknown): value is RoutineTask {
+  if (typeof value !== "object" || value === null) return false;
+  const task = value as Record<string, unknown>;
+  if (typeof task.id !== "string" || task.id.length < 1) return false;
+  if (task.type === "power") {
+    return typeof task.equipmentId === "string" && typeof task.enabled === "boolean";
+  }
+  if (task.type === "wait") {
+    return Number.isSafeInteger(task.durationSeconds) && Number(task.durationSeconds) > 0;
+  }
+  if (task.type === "dose") {
+    return typeof task.equipmentId === "string" &&
+      typeof task.milliliters === "number" && Number.isFinite(task.milliliters);
+  }
+  return task.type === "restore" || task.type === "hold";
+}
+
+function isRoutineDefinition(value: unknown): value is RoutineDefinition {
+  if (typeof value !== "object" || value === null) return false;
+  const routine = value as Record<string, unknown>;
+  return typeof routine.id === "string" && routine.id.length > 0 &&
+    typeof routine.name === "string" && routine.name.length > 0 &&
+    typeof routine.createdAt === "string" && typeof routine.updatedAt === "string" &&
+    Array.isArray(routine.tasks) && routine.tasks.length <= 50 &&
+    routine.tasks.every(isRoutineTask);
+}
+
+function isActiveRoutineExecution(value: unknown): value is ActiveRoutineExecution {
+  if (typeof value !== "object" || value === null) return false;
+  const active = value as Record<string, unknown>;
+  return typeof active.id === "string" && active.id.length > 0 &&
+    typeof active.routineId === "string" && active.routineId.length > 0 &&
+    typeof active.name === "string" && typeof active.startedAt === "string" &&
+    Number.isSafeInteger(active.taskIndex) && Number(active.taskIndex) >= 0 &&
+    typeof active.snapshots === "object" && active.snapshots !== null &&
+    Object.values(active.snapshots as Record<string, unknown>)
+      .every((snapshot) => typeof snapshot === "boolean") &&
+    (active.holding === undefined || typeof active.holding === "boolean") &&
+    (active.resumeAt === undefined || typeof active.resumeAt === "string");
+}
+
+function isRoutineRuntimeState(value: unknown): value is RoutineRuntimeState {
+  if (typeof value !== "object" || value === null) return false;
+  const routines = value as Record<string, unknown>;
+  return Array.isArray(routines.definitions) && routines.definitions.length <= 100 &&
+    routines.definitions.every(isRoutineDefinition) &&
+    (routines.active === null || isActiveRoutineExecution(routines.active));
 }
 
 export type CommandStatus =

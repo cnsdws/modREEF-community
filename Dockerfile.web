@@ -8,16 +8,22 @@ COPY patches patches
 COPY apps/mobile/package.json apps/mobile/package.json
 COPY packages/api-contract/package.json packages/api-contract/package.json
 COPY packages/cloud-client/package.json packages/cloud-client/package.json
+COPY packages/device-integration/package.json packages/device-integration/package.json
 COPY packages/digital-twin/package.json packages/digital-twin/package.json
+COPY packages/driver-yinmik-water/package.json packages/driver-yinmik-water/package.json
 COPY packages/foundation/package.json packages/foundation/package.json
+COPY packages/hal/package.json packages/hal/package.json
 COPY packages/onboarding/package.json packages/onboarding/package.json
 RUN pnpm install --frozen-lockfile --prod=false
 
 COPY apps/mobile apps/mobile
 COPY packages/api-contract packages/api-contract
 COPY packages/cloud-client packages/cloud-client
+COPY packages/device-integration packages/device-integration
 COPY packages/digital-twin packages/digital-twin
+COPY packages/driver-yinmik-water packages/driver-yinmik-water
 COPY packages/foundation packages/foundation
+COPY packages/hal packages/hal
 COPY packages/onboarding packages/onboarding
 
 ENV EXPO_PUBLIC_MODREEF_CONNECTION_MODE=cloud

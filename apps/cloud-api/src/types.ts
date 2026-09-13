@@ -1,5 +1,8 @@
 import type {
   AquariumEvent,
+  AuthorizationAuditEvent,
+  AquariumMember,
+  AquariumRole,
   AquariumSummary,
   CloudCommand,
   CloudCommandRequest,
@@ -35,6 +38,14 @@ export interface CloudRepository {
     | null
   >;
   restoreAquarium(identity: Identity, aquariumId: string): Promise<AquariumSummary | null>;
+  listAquariumMembers(identity: Identity, aquariumId: string): Promise<AquariumMember[] | null>;
+  addAquariumMember(identity: Identity, aquariumId: string, email: string, role: Exclude<AquariumRole, "owner">, receiveAlarms: boolean): Promise<AquariumMember | null | "forbidden">;
+  updateAquariumMember(identity: Identity, aquariumId: string, userId: string, update: { role?: Exclude<AquariumRole, "owner">; receiveAlarms?: boolean }): Promise<AquariumMember | null | "forbidden">;
+  removeAquariumMember(identity: Identity, aquariumId: string, userId: string): Promise<"removed" | "forbidden" | null>;
+  resendAquariumInvitation(identity: Identity, aquariumId: string, userId: string): Promise<AquariumMember | null | "forbidden">;
+  transferAquariumOwnership(identity: Identity, aquariumId: string, userId: string): Promise<AquariumMember[] | null | "forbidden">;
+  listAuthorizationAudit(identity: Identity, aquariumId: string): Promise<AuthorizationAuditEvent[] | null>;
+  deleteAccount(identity: Identity): Promise<{ deleted: true } | { deleted: false; ownedAquariumIds: string[] }>;
   listEdges(identity: Identity, aquariumId: string): Promise<EdgeSummary[] | null>;
   renameEdge(identity: Identity, aquariumId: string, edgeId: string, name: string): Promise<EdgeSummary | null>;
   retireEdge(identity: Identity, aquariumId: string, edgeId: string): Promise<

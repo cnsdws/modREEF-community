@@ -1,0 +1,27 @@
+{
+  "name": "@modreef/driver-yinmik-water",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./identity": "./src/identity.ts",
+    "./integration": "./src/integration.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modreef/device-integration": "workspace:*",
+    "@modreef/digital-twin": "workspace:*",
+    "@modreef/hal": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.7"
+  }
+}

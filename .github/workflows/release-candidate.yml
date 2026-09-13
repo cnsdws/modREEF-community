@@ -42,6 +42,19 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm --filter @modreef/mobile export:web
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production Cloud API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.cloud
+          push: false
+      - name: Build production web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.web
+          push: false
       - name: Build immutable Edge candidate
         run: |
           mkdir -p release-candidate
@@ -49,10 +62,19 @@ jobs:
           sha256sum release-candidate/modreef-edge-release.tar.gz | cut -d' ' -f1 > release-candidate/sha256.txt
           git rev-parse HEAD > release-candidate/commit.txt
           date -u +%FT%TZ > release-candidate/qualified-at.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-candidate-${{ inputs.commit }}
-          path: release-candidate
+      - name: Sign immutable Edge candidate
+        env:
+          MODREEF_EDGE_RELEASE_SIGNING_KEY: ${{ secrets.MODREEF_EDGE_RELEASE_SIGNING_KEY }}
+        run: |
+          test -n "${MODREEF_EDGE_RELEASE_SIGNING_KEY}"
+          install -m 0600 /dev/null /tmp/modreef-edge-release-key.pem
+          printf '%s\n' "${MODREEF_EDGE_RELEASE_SIGNING_KEY}" > /tmp/modreef-edge-release-key.pem
+          openssl pkeyutl -sign -rawin \
+            -inkey /tmp/modreef-edge-release-key.pem \
+            -in release-candidate/modreef-edge-release.tar.gz \
+            -out release-candidate/signature.bin
+          base64 -w0 release-candidate/signature.bin > release-candidate/signature.txt
+          rm -f /tmp/modreef-edge-release-key.pem release-candidate/signature.bin
       - name: Publish candidate to the staging channel
         env:
           MODREEF_RELEASE_PUBLISH_TOKEN: ${{ secrets.MODREEF_RELEASE_PUBLISH_TOKEN }}
@@ -63,5 +85,13 @@ jobs:
             --header "Content-Type: application/gzip" \
             --header "X-modREEF-Release-SHA256: $(cat release-candidate/sha256.txt)" \
             --header "X-modREEF-Source-Commit: $(cat release-candidate/commit.txt)" \
+            --header "X-modREEF-Release-Signature: $(cat release-candidate/signature.txt)" \
             --data-binary @release-candidate/modreef-edge-release.tar.gz \
             https://api.modreef.net/v1/releases/edge/staging
+      - name: Mirror candidate in GitHub Actions
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate-${{ inputs.commit }}
+          path: release-candidate
+          retention-days: 7

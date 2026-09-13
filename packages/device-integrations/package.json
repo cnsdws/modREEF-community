@@ -1,0 +1,30 @@
+{
+  "name": "@modreef/device-integrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modreef/device-integration": "workspace:*",
+    "@modreef/driver-ghome-wp12": "workspace:*",
+    "@modreef/driver-jebao-dmp": "workspace:*",
+    "@modreef/driver-jebao-md44": "workspace:*",
+    "@modreef/driver-jebao-mdp": "workspace:*",
+    "@modreef/driver-matter": "workspace:*",
+    "@modreef/driver-yinmik-water": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.7"
+  }
+}

@@ -5,7 +5,7 @@ import {
   isOperationalHandoffFailure,
   isRecoverableMatterPairingFailure,
   isTapoP316mMatterDevice,
-} from "../src/matter-controller.js";
+} from "../src/controller.js";
 
 describe("MatterLifecycleCoordinator", () => {
   it("recognizes the P316M identity encoded in its Matter QR payload", () => {

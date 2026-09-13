@@ -28,6 +28,20 @@ pnpm --filter @modreef/mobile export:web
 Native and physical-device changes also require the applicable acceptance test
 and a written record of the hardware and firmware used.
 
+## Adding a device integration
+
+Read `docs/architecture/210-device-integrations.md`, then scaffold a driver and
+device profile:
+
+```bash
+pnpm create:device vendor-model
+```
+
+New integrations begin as experimental. Keep device-specific discovery,
+protocol, state mapping, and commands inside the generated package. Do not add
+manufacturer checks to the tablet, web, cloud, or general Edge runtime when the
+integration manifest or capability model can express the behavior.
+
 ## Contributions and provenance
 
 By submitting a contribution, you agree that it is licensed under the project

@@ -53,7 +53,7 @@ import {
   swapEquipmentBindings,
   type EquipmentChannelTelemetry,
 } from "./equipment-runtime.js";
-import { isWaterProbeCalibration } from "./yinmik-water-equipment.js";
+import { isWaterProbeCalibration } from "@modreef/driver-yinmik-water";
 
 const commandRegistry = new CommandRegistry();
 

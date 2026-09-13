@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AquariumDigitalTwin } from "@modreef/digital-twin";
 
-import { addMatterDevice } from "../src/matter-equipment.js";
+import { addMatterDevice } from "../src/equipment.js";
 
 const twin: AquariumDigitalTwin = {
   aquarium: {

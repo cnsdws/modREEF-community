@@ -1,4 +1,5 @@
 import {
+  aquariumRoles,
   buildObserverRecommendation,
   buildReefSnapshot,
   buildReefCoachReport,
@@ -7,8 +8,10 @@ import {
   isNamedResourceRequest,
   isWaterAlarmRules,
 } from "@modreef/api-contract";
+import type { AquariumRole } from "@modreef/api-contract";
 import type { AppRequest, AppResponse, Authenticator, CloudRepository } from "./types.js";
 import type { ReefCoachProvider } from "./reef-coach-provider.js";
+import type { InvitationNotifier } from "./invitation-notifier.js";
 
 const json = (status: number, body: unknown): AppResponse => ({ status, body });
 
@@ -17,6 +20,7 @@ export class CloudApplication {
     private readonly repository: CloudRepository,
     private readonly authenticator: Authenticator,
     private readonly reefCoachProvider?: ReefCoachProvider,
+    private readonly invitationNotifier?: InvitationNotifier,
   ) {}
 
   async handle(request: AppRequest): Promise<AppResponse> {
@@ -61,6 +65,41 @@ export class CloudApplication {
       const aquarium = await this.repository.createAquarium(identity, request.body.name.trim());
       return json(201, { aquarium });
     }
+    if (request.method === "DELETE" && request.path === "/v1/account") {
+      const result = await this.repository.deleteAccount(identity);
+      return result.deleted
+        ? json(200, { deleted: true })
+        : json(409, {
+          error: "Transfer ownership or remove every owned aquarium before deleting this account",
+          code: "ACCOUNT_OWNS_AQUARIUMS",
+          ownedAquariumIds: result.ownedAquariumIds,
+        });
+    }
+
+    const exportMatch = /^\/v1\/aquariums\/([^/]+)\/export$/.exec(request.path);
+    if (request.method === "GET" && exportMatch) {
+      const aquariumId = exportMatch[1]!;
+      const [aquarium, controllers, devices, equipment, events, waterAlarmSettings, members, authorizationAudit] = await Promise.all([
+        this.repository.getAquarium(identity, aquariumId),
+        this.repository.listEdges(identity, aquariumId),
+        this.repository.listDevices(identity, aquariumId),
+        this.repository.listEquipment(identity, aquariumId),
+        this.repository.listEvents(identity, aquariumId, 100_000),
+        this.repository.getWaterAlarmSettings(identity, aquariumId),
+        this.repository.listAquariumMembers(identity, aquariumId),
+        this.repository.listAuthorizationAudit(identity, aquariumId),
+      ]);
+      if (!aquarium || !controllers || !devices || !equipment || !events || !members) return this.notFound();
+      return json(200, {
+        export: {
+          schemaVersion: "1", exportedAt: new Date().toISOString(), aquarium,
+          controllers, devices, equipment, events,
+          waterAlarmSettings: waterAlarmSettings ?? null,
+          members,
+          authorizationAudit: authorizationAudit ?? [],
+        },
+      });
+    }
 
     const archiveMatch = /^\/v1\/aquariums\/([^/]+)\/archive$/.exec(request.path);
     if (request.method === "POST" && archiveMatch) {
@@ -79,6 +118,81 @@ export class CloudApplication {
     if (request.method === "POST" && restoreMatch) {
       const aquarium = await this.repository.restoreAquarium(identity, restoreMatch[1]!);
       return aquarium ? json(200, { aquarium }) : this.notFound();
+    }
+
+    const membersMatch = /^\/v1\/aquariums\/([^/]+)\/members(?:\/([^/]+))?$/.exec(request.path);
+    if (membersMatch) {
+      const aquariumId = membersMatch[1]!;
+      const memberId = membersMatch[2];
+      if (request.method === "GET" && !memberId) {
+        const members = await this.repository.listAquariumMembers(identity, aquariumId);
+        return members ? json(200, { members }) : this.notFound();
+      }
+      if (request.method === "POST" && !memberId) {
+        const body = request.body as Record<string, unknown> | null;
+        const role = body?.role;
+        if (typeof body?.email !== "string" || !/^\S+@\S+\.\S+$/.test(body.email) ||
+            !isAssignableRole(role)) {
+          return json(400, { error: "A valid email and access level are required", code: "INVALID_MEMBER" });
+        }
+        const member = await this.repository.addAquariumMember(
+          identity, aquariumId, body.email, role,
+          typeof body.receiveAlarms === "boolean" ? body.receiveAlarms : true,
+        );
+        if (member === "forbidden") return this.forbidden();
+        if (member?.pending && member.email) {
+          await this.deliverInvitation(identity, aquariumId, member);
+        }
+        return member ? json(201, { member }) : this.notFound();
+      }
+      if (request.method === "PATCH" && memberId) {
+        const body = request.body as Record<string, unknown> | null;
+        const role = body?.role;
+        const receiveAlarms = body?.receiveAlarms;
+        if ((role === undefined && receiveAlarms === undefined) ||
+            (role !== undefined && !isAssignableRole(role)) ||
+            (receiveAlarms !== undefined && typeof receiveAlarms !== "boolean")) {
+          return json(400, { error: "Invalid member update", code: "INVALID_MEMBER" });
+        }
+        const member = await this.repository.updateAquariumMember(identity, aquariumId, memberId, {
+          ...(role !== undefined ? { role } : {}),
+          ...(typeof receiveAlarms === "boolean" ? { receiveAlarms } : {}),
+        });
+        return member === "forbidden" ? this.forbidden()
+          : member ? json(200, { member }) : this.notFound();
+      }
+      if (request.method === "DELETE" && memberId) {
+        const result = await this.repository.removeAquariumMember(identity, aquariumId, memberId);
+        return result === "forbidden" ? this.forbidden()
+          : result === "removed" ? json(200, { deleted: true }) : this.notFound();
+      }
+    }
+
+    const resendInvitationMatch = /^\/v1\/aquariums\/([^/]+)\/members\/([^/]+)\/resend$/.exec(request.path);
+    if (request.method === "POST" && resendInvitationMatch) {
+      const member = await this.repository.resendAquariumInvitation(
+        identity, resendInvitationMatch[1]!, resendInvitationMatch[2]!,
+      );
+      if (member === "forbidden") return this.forbidden();
+      if (member?.email) await this.deliverInvitation(identity, resendInvitationMatch[1]!, member);
+      return member ? json(200, { member }) : this.notFound();
+    }
+
+    const transferOwnershipMatch = /^\/v1\/aquariums\/([^/]+)\/members\/([^/]+)\/transfer-ownership$/.exec(request.path);
+    if (request.method === "POST" && transferOwnershipMatch) {
+      const members = await this.repository.transferAquariumOwnership(
+        identity, transferOwnershipMatch[1]!, transferOwnershipMatch[2]!,
+      );
+      return members === "forbidden" ? this.forbidden()
+        : members ? json(200, { members }) : this.notFound();
+    }
+
+    const authorizationAuditMatch = /^\/v1\/aquariums\/([^/]+)\/authorization-audit$/.exec(request.path);
+    if (request.method === "GET" && authorizationAuditMatch) {
+      const events = await this.repository.listAuthorizationAudit(
+        identity, authorizationAuditMatch[1]!,
+      );
+      return events ? json(200, { events }) : this.notFound();
     }
 
     const coachMatch = /^\/v1\/aquariums\/([^/]+)\/coach$/.exec(request.path);
@@ -259,4 +373,28 @@ export class CloudApplication {
     // Deliberately hides whether another tenant owns the resource.
     return json(404, { error: "Aquarium not found", code: "NOT_FOUND" });
   }
+
+  private forbidden(): AppResponse {
+    return json(403, { error: "Your aquarium access level does not allow this action", code: "FORBIDDEN" });
+  }
+
+  private async deliverInvitation(
+    identity: import("./types.js").Identity,
+    aquariumId: string,
+    member: import("@modreef/api-contract").AquariumMember,
+  ): Promise<void> {
+    if (!this.invitationNotifier || !member.email) return;
+    const aquarium = await this.repository.getAquarium(identity, aquariumId).catch(() => null);
+    await this.invitationNotifier.sendInvitation({
+      aquariumId,
+      aquariumName: aquarium?.name ?? "a modREEF aquarium",
+      email: member.email,
+      invitedBy: identity.email ?? null,
+      expiresAt: member.expiresAt ?? null,
+    }).catch((error) => console.error("Invitation email delivery failed:", error instanceof Error ? error.message : "unknown error"));
+  }
+}
+
+function isAssignableRole(value: unknown): value is Exclude<AquariumRole, "owner"> {
+  return aquariumRoles.includes(value as AquariumRole) && value !== "owner";
 }

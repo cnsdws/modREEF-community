@@ -1,5 +1,8 @@
 import type {
   AquariumSummary,
+  AquariumExport,
+  AquariumMember,
+  AquariumRole,
   CreateAquariumRequest,
   RegisterEdgeRequest,
   RegisteredEdgeCredentials,
@@ -9,6 +12,7 @@ import type {
   CloudDeviceSnapshot,
   EdgeSummary,
   AquariumEvent,
+  AuthorizationAuditEvent,
   ReefCoachReport,
   WaterAlarmRules,
   WaterAlarmSettings,
@@ -96,6 +100,90 @@ export class ModReefCloudClient {
       path: `/v1/aquariums/${encodeURIComponent(aquariumId)}/restore`,
     });
     return response.aquarium;
+  }
+
+  async exportAquarium(aquariumId: string): Promise<AquariumExport> {
+    const response = await this.transport.request<{ export: AquariumExport }>({
+      method: "GET",
+      path: `/v1/aquariums/${encodeURIComponent(aquariumId)}/export`,
+    });
+    return response.export;
+  }
+
+  async deleteAccount(): Promise<void> {
+    await this.transport.request<{ deleted: true }>({ method: "DELETE", path: "/v1/account" });
+  }
+
+  async listAquariumMembers(aquariumId: string): Promise<AquariumMember[]> {
+    const response = await this.transport.request<{ members: AquariumMember[] }>({
+      method: "GET",
+      path: `/v1/aquariums/${encodeURIComponent(aquariumId)}/members`,
+    });
+    return response.members;
+  }
+
+  async addAquariumMember(
+    aquariumId: string,
+    email: string,
+    role: Exclude<AquariumRole, "owner">,
+    receiveAlarms = true,
+  ): Promise<AquariumMember> {
+    const response = await this.transport.request<
+      { member: AquariumMember },
+      { email: string; role: Exclude<AquariumRole, "owner">; receiveAlarms: boolean }
+    >({
+      method: "POST",
+      path: `/v1/aquariums/${encodeURIComponent(aquariumId)}/members`,
+      body: { email, role, receiveAlarms },
+    });
+    return response.member;
+  }
+
+  async updateAquariumMember(
+    aquariumId: string,
+    userId: string,
+    update: { role?: Exclude<AquariumRole, "owner">; receiveAlarms?: boolean },
+  ): Promise<AquariumMember> {
+    const response = await this.transport.request<
+      { member: AquariumMember },
+      { role?: Exclude<AquariumRole, "owner">; receiveAlarms?: boolean }
+    >({
+      method: "PATCH",
+      path: `/v1/aquariums/${encodeURIComponent(aquariumId)}/members/${encodeURIComponent(userId)}`,
+      body: update,
+    });
+    return response.member;
+  }
+
+  async removeAquariumMember(aquariumId: string, userId: string): Promise<void> {
+    await this.transport.request<{ deleted: true }>({
+      method: "DELETE",
+      path: `/v1/aquariums/${encodeURIComponent(aquariumId)}/members/${encodeURIComponent(userId)}`,
+    });
+  }
+
+  async resendAquariumInvitation(aquariumId: string, userId: string): Promise<AquariumMember> {
+    const response = await this.transport.request<{ member: AquariumMember }>({
+      method: "POST",
+      path: `/v1/aquariums/${encodeURIComponent(aquariumId)}/members/${encodeURIComponent(userId)}/resend`,
+    });
+    return response.member;
+  }
+
+  async transferAquariumOwnership(aquariumId: string, userId: string): Promise<AquariumMember[]> {
+    const response = await this.transport.request<{ members: AquariumMember[] }>({
+      method: "POST",
+      path: `/v1/aquariums/${encodeURIComponent(aquariumId)}/members/${encodeURIComponent(userId)}/transfer-ownership`,
+    });
+    return response.members;
+  }
+
+  async listAuthorizationAudit(aquariumId: string): Promise<AuthorizationAuditEvent[]> {
+    const response = await this.transport.request<{ events: AuthorizationAuditEvent[] }>({
+      method: "GET",
+      path: `/v1/aquariums/${encodeURIComponent(aquariumId)}/authorization-audit`,
+    });
+    return response.events;
   }
 
   async registerEdge(aquariumId: string, name: string): Promise<RegisteredEdgeCredentials> {

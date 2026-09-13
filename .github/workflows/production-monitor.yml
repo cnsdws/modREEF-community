@@ -1,0 +1,40 @@
+name: Production monitor
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-monitor
+  cancel-in-progress: true
+
+jobs:
+  public-health:
+    name: Public production health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check Cloud API liveness
+        run: curl --fail --show-error --silent --max-time 15 https://api.modreef.net/health/live
+      - name: Check Cloud API readiness
+        run: curl --fail --show-error --silent --max-time 15 https://api.modreef.net/health/ready
+      - name: Check web application
+        run: curl --fail --show-error --silent --max-time 15 --output /dev/null https://www.modreef.net/
+      - name: Check production Edge release service
+        run: |
+          curl --fail --show-error --silent --max-time 15 \
+            https://api.modreef.net/v1/releases/edge/latest \
+            | node -e '
+              let body = "";
+              process.stdin.on("data", (chunk) => body += chunk);
+              process.stdin.on("end", () => {
+                const release = JSON.parse(body);
+                if (!/^[a-f0-9]{64}$/.test(release.sha256) ||
+                    !Number.isSafeInteger(release.size) || release.size <= 0 ||
+                    !/^https:\/\//.test(release.url)) process.exit(1);
+              });
+            '

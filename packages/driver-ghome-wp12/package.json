@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./integration": "./src/integration.ts"
   },
   "scripts": {
     "build": "tsc --noEmit",
@@ -14,6 +15,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@modreef/device-integration": "workspace:*",
     "@modreef/foundation": "workspace:*",
     "@modreef/hal": "workspace:*"
   },

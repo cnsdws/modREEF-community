@@ -1,22 +1,16 @@
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import type {
-  AquariumEvent, CloudCommandRequest, EdgeSyncRequest, WaterAlarmRules, WaterAlarmSettings,
+  AquariumEvent, AquariumRole, CloudCommandRequest, EdgeSyncRequest, WaterAlarmRules, WaterAlarmSettings,
 } from "@modreef/api-contract";
 import type { CloudRepository, Identity } from "./types.js";
-
-const transientCommandTypes = [
-  "automation.feed-cycle.start",
-  "automation.feed-cycle.stop",
-  "equipment.run-doser-calibration",
-  "equipment.set-control-mode",
-  "equipment.set-power",
-  "equipment.set-speed",
-  "equipment.set-wavemaker-configuration",
-];
+import {
+  hasAquariumRole, requiredRoleForCommand, transientCommandTypes,
+} from "./authorization.js";
 
 const postgresUuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 
 export class PostgresCloudRepository implements CloudRepository {
   constructor(private readonly pool: Pool) {}
@@ -26,20 +20,72 @@ export class PostgresCloudRepository implements CloudRepository {
   }
 
   private async userId(identity: Identity): Promise<string> {
-    const result = await this.pool.query<{ id: string }>(
-      `INSERT INTO users (auth_subject, email) VALUES ($1, $2)
-       ON CONFLICT (auth_subject) DO UPDATE SET email = COALESCE(EXCLUDED.email, users.email)
-       RETURNING id`,
-      [identity.subject, identity.email ?? null],
-    );
-    return result.rows[0]!.id;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<{ id: string }>(
+        `INSERT INTO users (auth_subject, email) VALUES ($1, $2)
+         ON CONFLICT (auth_subject) DO UPDATE SET email = COALESCE(EXCLUDED.email, users.email)
+         RETURNING id`,
+        [identity.subject, identity.email ?? null],
+      );
+      const userId = result.rows[0]!.id;
+      if (identity.email) {
+        const pendingSubject = `invited:${identity.email.trim().toLowerCase()}`;
+        const pending = await client.query<{ id: string }>(
+          `SELECT id FROM users WHERE auth_subject = $1 AND id <> $2`,
+          [pendingSubject, userId],
+        );
+        if (pending.rows[0]) {
+          const accepted = await client.query<{ aquariumId: string }>(
+            `INSERT INTO aquarium_memberships
+               (aquarium_id, user_id, role, receive_alarms, joined_at,
+                invited_at, accepted_at, invitation_expires_at)
+             SELECT aquarium_id, $1, role, receive_alarms, joined_at,
+                    invited_at, now(), NULL
+             FROM aquarium_memberships
+             WHERE user_id = $2
+               AND (invitation_expires_at IS NULL OR invitation_expires_at > now())
+             ON CONFLICT (aquarium_id, user_id) DO UPDATE SET
+               role = CASE
+                 WHEN aquarium_memberships.role = 'owner' OR EXCLUDED.role = 'owner' THEN 'owner'
+                 WHEN aquarium_memberships.role = 'manage' OR EXCLUDED.role = 'manage' THEN 'manage'
+                 WHEN aquarium_memberships.role = 'program' OR EXCLUDED.role = 'program' THEN 'program'
+                 WHEN aquarium_memberships.role = 'control' OR EXCLUDED.role = 'control' THEN 'control'
+                 ELSE 'view' END,
+               receive_alarms = aquarium_memberships.receive_alarms OR EXCLUDED.receive_alarms,
+               joined_at = LEAST(aquarium_memberships.joined_at, EXCLUDED.joined_at),
+               accepted_at = now(), invitation_expires_at = NULL
+             RETURNING aquarium_id AS "aquariumId"`,
+            [userId, pending.rows[0].id],
+          );
+          for (const membership of accepted.rows) {
+            await client.query(
+              `INSERT INTO aquarium_authorization_audit
+                 (aquarium_id, actor_user_id, target_user_id, actor_email,
+                  target_email, action, details)
+               VALUES ($1, $2, $2, $3, $3, 'member.accepted', '{}'::jsonb)`,
+              [membership.aquariumId, userId, identity.email.trim().toLowerCase()],
+            );
+          }
+          await client.query(`DELETE FROM users WHERE id = $1`, [pending.rows[0].id]);
+        }
+      }
+      await client.query("COMMIT");
+      return userId;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   private async access(
     identity: Identity,
     aquariumId: string,
     includeArchived = false,
-  ): Promise<{ userId: string; role: "owner" | "admin" | "viewer" | null }> {
+  ): Promise<{ userId: string; role: AquariumRole | null }> {
     // Aquarium primary keys are PostgreSQL UUIDs. Reject malformed route
     // parameters before they reach a typed query so a stale client identifier
     // becomes a normal not-found response instead of a database error.
@@ -47,7 +93,7 @@ export class PostgresCloudRepository implements CloudRepository {
       return { userId: "", role: null };
     }
     const userId = await this.userId(identity);
-    const result = await this.pool.query<{ role: "owner" | "admin" | "viewer" }>(
+    const result = await this.pool.query<{ role: AquariumRole }>(
       `SELECT membership.role
        FROM aquarium_memberships membership
        JOIN aquariums aquarium ON aquarium.id = membership.aquarium_id
@@ -111,7 +157,7 @@ export class PostgresCloudRepository implements CloudRepository {
 
   async renameAquarium(identity: Identity, aquariumId: string, name: string) {
     const access = await this.access(identity, aquariumId);
-    if (!access.role || access.role === "viewer") return null;
+    if (!hasAquariumRole(access.role, "manage")) return null;
     const result = await this.pool.query(
       `UPDATE aquariums SET name = $2
        WHERE id = $1 AND archived_at IS NULL
@@ -124,7 +170,7 @@ export class PostgresCloudRepository implements CloudRepository {
 
   async archiveAquarium(identity: Identity, aquariumId: string) {
     const access = await this.access(identity, aquariumId);
-    if (!access.role || access.role === "viewer") return null;
+    if (access.role !== "owner") return null;
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -170,7 +216,7 @@ export class PostgresCloudRepository implements CloudRepository {
 
   async restoreAquarium(identity: Identity, aquariumId: string) {
     const access = await this.access(identity, aquariumId, true);
-    if (!access.role || access.role === "viewer") return null;
+    if (access.role !== "owner") return null;
     const result = await this.pool.query(
       `UPDATE aquariums SET archived_at = NULL
        WHERE id = $1 AND archived_at IS NOT NULL
@@ -178,6 +224,264 @@ export class PostgresCloudRepository implements CloudRepository {
       [aquariumId],
     );
     return result.rows[0] ? { ...result.rows[0], role: access.role } : null;
+  }
+
+  async listAquariumMembers(identity: Identity, aquariumId: string) {
+    const access = await this.access(identity, aquariumId);
+    if (!access.role) return null;
+    const result = await this.pool.query(
+      `SELECT u.id AS "userId", u.email, m.role,
+              m.receive_alarms AS "receiveAlarms", m.joined_at AS "joinedAt",
+              (u.id = $2) AS "currentUser",
+              (u.auth_subject LIKE 'invited:%') AS pending,
+              m.invited_at AS "invitedAt", m.accepted_at AS "acceptedAt",
+              m.invitation_expires_at AS "expiresAt"
+       FROM aquarium_memberships m
+       JOIN users u ON u.id = m.user_id
+       WHERE m.aquarium_id = $1 AND ($3::boolean OR u.id = $2)
+       ORDER BY CASE m.role
+         WHEN 'owner' THEN 0 WHEN 'manage' THEN 1 WHEN 'program' THEN 2
+         WHEN 'control' THEN 3 ELSE 4 END, lower(COALESCE(u.email, ''))`,
+      [aquariumId, access.userId, hasAquariumRole(access.role, "manage")],
+    );
+    return result.rows;
+  }
+
+  async addAquariumMember(
+    identity: Identity,
+    aquariumId: string,
+    email: string,
+    role: Exclude<AquariumRole, "owner">,
+    receiveAlarms: boolean,
+  ) {
+    const access = await this.access(identity, aquariumId);
+    if (!hasAquariumRole(access.role, "manage")) return "forbidden" as const;
+    const normalizedEmail = email.trim().toLowerCase();
+    const existing = await this.pool.query<{ id: string }>(
+      `SELECT id FROM users
+       WHERE lower(email) = $1 AND auth_subject NOT LIKE 'invited:%'
+       ORDER BY created_at LIMIT 1`,
+      [normalizedEmail],
+    );
+    const pending = existing.rows[0] ? null : await this.pool.query<{ id: string }>(
+      `INSERT INTO users (auth_subject, email)
+       VALUES ($1, $2)
+       ON CONFLICT (auth_subject) DO UPDATE SET email = EXCLUDED.email
+       RETURNING id`,
+      [`invited:${normalizedEmail}`, normalizedEmail],
+    );
+    const targetUserId = existing.rows[0]?.id ?? pending!.rows[0]!.id;
+    const result = await this.pool.query(
+      `INSERT INTO aquarium_memberships
+         (aquarium_id, user_id, role, receive_alarms, invited_at,
+          accepted_at, invitation_expires_at)
+       VALUES ($1, $2, $3, $4, now(),
+               CASE WHEN $5::boolean THEN NULL ELSE now() END,
+               CASE WHEN $5::boolean THEN now() + interval '7 days' ELSE NULL END)
+       ON CONFLICT (aquarium_id, user_id) DO UPDATE SET
+         role = CASE WHEN aquarium_memberships.role = 'owner' THEN 'owner' ELSE EXCLUDED.role END,
+         receive_alarms = CASE WHEN aquarium_memberships.role = 'owner'
+           THEN aquarium_memberships.receive_alarms ELSE EXCLUDED.receive_alarms END,
+         invited_at = CASE WHEN $5::boolean THEN now() ELSE aquarium_memberships.invited_at END,
+         invitation_expires_at = CASE WHEN $5::boolean
+           THEN now() + interval '7 days' ELSE NULL END
+       RETURNING user_id AS "userId",
+         (SELECT email FROM users WHERE id = user_id) AS email,
+         role, receive_alarms AS "receiveAlarms", joined_at AS "joinedAt",
+         ((SELECT auth_subject FROM users WHERE id = user_id) LIKE 'invited:%') AS pending,
+         invited_at AS "invitedAt", accepted_at AS "acceptedAt",
+         invitation_expires_at AS "expiresAt"`,
+      [aquariumId, targetUserId, role, receiveAlarms, pending !== null],
+    );
+    await this.pool.query(
+      `INSERT INTO aquarium_authorization_audit
+         (aquarium_id, actor_user_id, target_user_id, actor_email,
+          target_email, action, details)
+       SELECT $1, $2, $3, actor.email, target.email, 'member.invited',
+              jsonb_build_object('role', $4::text)
+       FROM users actor, users target WHERE actor.id = $2 AND target.id = $3`,
+      [aquariumId, access.userId, targetUserId, role],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async updateAquariumMember(
+    identity: Identity,
+    aquariumId: string,
+    userId: string,
+    update: { role?: Exclude<AquariumRole, "owner">; receiveAlarms?: boolean },
+  ) {
+    const access = await this.access(identity, aquariumId);
+    if (!access.role) return null;
+    const editingSelf = access.userId === userId;
+    if (update.role !== undefined && !hasAquariumRole(access.role, "manage")) return "forbidden" as const;
+    if (update.receiveAlarms !== undefined && !editingSelf) return "forbidden" as const;
+    if (!editingSelf && !hasAquariumRole(access.role, "manage")) return "forbidden" as const;
+    const result = await this.pool.query(
+      `UPDATE aquarium_memberships m SET
+         role = CASE WHEN m.role = 'owner' THEN m.role ELSE COALESCE($3, m.role) END,
+         receive_alarms = COALESCE($4, m.receive_alarms)
+       FROM users u
+       WHERE m.aquarium_id = $1 AND m.user_id = $2 AND u.id = m.user_id
+         AND (m.role <> 'owner' OR $2 = $5)
+         AND ($3::text IS NULL OR m.role <> 'owner')
+       RETURNING u.id AS "userId", u.email, m.role,
+         m.receive_alarms AS "receiveAlarms", m.joined_at AS "joinedAt",
+         (u.id = $5) AS "currentUser", (u.auth_subject LIKE 'invited:%') AS pending,
+         m.invited_at AS "invitedAt", m.accepted_at AS "acceptedAt",
+         m.invitation_expires_at AS "expiresAt"`,
+      [aquariumId, userId, update.role ?? null, update.receiveAlarms ?? null, access.userId],
+    );
+    if (result.rows[0]) {
+      const action = update.role !== undefined
+        ? "member.role-changed"
+        : "member.notification-changed";
+      await this.pool.query(
+        `INSERT INTO aquarium_authorization_audit
+           (aquarium_id, actor_user_id, target_user_id, actor_email,
+            target_email, action, details)
+         SELECT $1, $2, $3, actor.email, target.email, $4,
+                jsonb_build_object('role', $5::text, 'receiveAlarms', $6::boolean)
+         FROM users actor, users target WHERE actor.id = $2 AND target.id = $3`,
+        [aquariumId, access.userId, userId, action, update.role ?? null, update.receiveAlarms ?? null],
+      );
+    }
+    return result.rows[0] ?? null;
+  }
+
+  async removeAquariumMember(identity: Identity, aquariumId: string, userId: string) {
+    const access = await this.access(identity, aquariumId);
+    if (!hasAquariumRole(access.role, "manage")) return "forbidden" as const;
+    const result = await this.pool.query(
+      `DELETE FROM aquarium_memberships
+       WHERE aquarium_id = $1 AND user_id = $2 AND role <> 'owner'
+       RETURNING user_id`,
+      [aquariumId, userId],
+    );
+    if (result.rowCount === 1) {
+      await this.pool.query(
+        `INSERT INTO aquarium_authorization_audit
+           (aquarium_id, actor_user_id, target_user_id, actor_email,
+            target_email, action)
+         SELECT $1, $2, $3, actor.email, target.email, 'member.removed'
+         FROM users actor, users target WHERE actor.id = $2 AND target.id = $3`,
+        [aquariumId, access.userId, userId],
+      );
+    }
+    return result.rowCount === 1 ? "removed" as const : null;
+  }
+
+  async resendAquariumInvitation(identity: Identity, aquariumId: string, userId: string) {
+    const access = await this.access(identity, aquariumId);
+    if (!hasAquariumRole(access.role, "manage")) return "forbidden" as const;
+    const result = await this.pool.query(
+      `UPDATE aquarium_memberships membership SET
+         invited_at = now(), invitation_expires_at = now() + interval '7 days'
+       FROM users target
+       WHERE membership.aquarium_id = $1 AND membership.user_id = $2
+         AND target.id = membership.user_id AND target.auth_subject LIKE 'invited:%'
+       RETURNING target.id AS "userId", target.email, membership.role,
+         membership.receive_alarms AS "receiveAlarms",
+         membership.joined_at AS "joinedAt", true AS pending,
+         membership.invited_at AS "invitedAt", membership.accepted_at AS "acceptedAt",
+         membership.invitation_expires_at AS "expiresAt"`,
+      [aquariumId, userId],
+    );
+    if (!result.rows[0]) return null;
+    await this.pool.query(
+      `INSERT INTO aquarium_authorization_audit
+         (aquarium_id, actor_user_id, target_user_id, actor_email,
+          target_email, action)
+       SELECT $1, $2, $3, actor.email, target.email, 'member.invitation-resent'
+       FROM users actor, users target WHERE actor.id = $2 AND target.id = $3`,
+      [aquariumId, access.userId, userId],
+    );
+    return result.rows[0];
+  }
+
+  async transferAquariumOwnership(identity: Identity, aquariumId: string, userId: string) {
+    const access = await this.access(identity, aquariumId);
+    if (access.role !== "owner") return "forbidden" as const;
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const target = await client.query<{ email: string | null }>(
+        `SELECT users.email FROM aquarium_memberships membership
+         JOIN users ON users.id = membership.user_id
+         WHERE membership.aquarium_id = $1 AND membership.user_id = $2
+           AND membership.role = 'manage' AND users.auth_subject NOT LIKE 'invited:%'
+         FOR UPDATE`,
+        [aquariumId, userId],
+      );
+      if (!target.rows[0]) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      await client.query(
+        `UPDATE aquarium_memberships SET role = 'manage'
+         WHERE aquarium_id = $1 AND user_id = $2 AND role = 'owner'`,
+        [aquariumId, access.userId],
+      );
+      await client.query(
+        `UPDATE aquarium_memberships SET role = 'owner'
+         WHERE aquarium_id = $1 AND user_id = $2 AND role = 'manage'`,
+        [aquariumId, userId],
+      );
+      await client.query(
+        `INSERT INTO aquarium_authorization_audit
+           (aquarium_id, actor_user_id, target_user_id, actor_email,
+            target_email, action)
+         SELECT $1, $2, $3, actor.email, target.email, 'ownership.transferred'
+         FROM users actor, users target WHERE actor.id = $2 AND target.id = $3`,
+        [aquariumId, access.userId, userId],
+      );
+      await client.query("COMMIT");
+      return await this.listAquariumMembers(identity, aquariumId);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listAuthorizationAudit(identity: Identity, aquariumId: string) {
+    const access = await this.access(identity, aquariumId);
+    if (!hasAquariumRole(access.role, "manage")) return null;
+    const result = await this.pool.query(
+      `SELECT id, aquarium_id AS "aquariumId", actor_email AS "actorEmail",
+              target_email AS "targetEmail", action, details,
+              occurred_at AS "occurredAt"
+       FROM aquarium_authorization_audit WHERE aquarium_id = $1
+       ORDER BY occurred_at DESC LIMIT 200`,
+      [aquariumId],
+    );
+    return result.rows;
+  }
+
+  async deleteAccount(identity: Identity) {
+    const userId = await this.userId(identity);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const owned = await client.query<{ aquariumId: string }>(
+        `SELECT aquarium_id AS "aquariumId" FROM aquarium_memberships
+         WHERE user_id = $1 AND role = 'owner' ORDER BY aquarium_id FOR UPDATE`,
+        [userId],
+      );
+      if (owned.rows.length > 0) {
+        await client.query("ROLLBACK");
+        return { deleted: false as const, ownedAquariumIds: owned.rows.map(({ aquariumId }) => aquariumId) };
+      }
+      await client.query(`DELETE FROM users WHERE id = $1`, [userId]);
+      await client.query("COMMIT");
+      return { deleted: true as const };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async listEdges(identity: Identity, aquariumId: string) {
@@ -193,7 +497,7 @@ export class PostgresCloudRepository implements CloudRepository {
 
   async renameEdge(identity: Identity, aquariumId: string, edgeId: string, name: string) {
     const access = await this.access(identity, aquariumId);
-    if (!access.role || access.role === "viewer") return null;
+    if (!hasAquariumRole(access.role, "manage")) return null;
     const result = await this.pool.query(
       `UPDATE edges SET name = $3
        WHERE id = $1 AND aquarium_id = $2 AND retired_at IS NULL
@@ -208,7 +512,7 @@ export class PostgresCloudRepository implements CloudRepository {
 
   async retireEdge(identity: Identity, aquariumId: string, edgeId: string) {
     const access = await this.access(identity, aquariumId);
-    if (!access.role || access.role === "viewer") return null;
+    if (!hasAquariumRole(access.role, "manage")) return null;
     const blockers = await this.pool.query<{
       equipmentId: string | null;
       deviceId: string | null;
@@ -253,7 +557,7 @@ export class PostgresCloudRepository implements CloudRepository {
 
   async reprovisionEdge(identity: Identity, aquariumId: string, edgeId: string) {
     const access = await this.access(identity, aquariumId);
-    if (!access.role || access.role === "viewer") return null;
+    if (!hasAquariumRole(access.role, "manage")) return null;
     const token = randomBytes(32).toString("base64url");
     const tokenHash = createHash("sha256").update(token).digest("hex");
     const result = await this.pool.query<{ id: string }>(
@@ -268,7 +572,7 @@ export class PostgresCloudRepository implements CloudRepository {
 
   async createLocalAuthorization(identity: Identity, aquariumId: string, edgeId: string) {
     const access = await this.access(identity, aquariumId);
-    if (!access.role || access.role === "viewer") return null;
+    if (!hasAquariumRole(access.role, "manage")) return null;
     const result = await this.pool.query<{ deviceTokenHash: string }>(
       `SELECT device_token_hash AS "deviceTokenHash" FROM edges
        WHERE id = $1 AND aquarium_id = $2 AND retired_at IS NULL
@@ -330,7 +634,7 @@ export class PostgresCloudRepository implements CloudRepository {
 
   async saveWaterAlarmSettings(identity: Identity, aquariumId: string, rules: WaterAlarmRules) {
     const access = await this.access(identity, aquariumId);
-    if (!access.role || access.role === "viewer") return null;
+    if (!hasAquariumRole(access.role, "program")) return null;
     const result = await this.pool.query<WaterAlarmSettings>(
       `INSERT INTO water_alarm_settings (aquarium_id, rules)
        VALUES ($1, $2)
@@ -346,7 +650,7 @@ export class PostgresCloudRepository implements CloudRepository {
 
   async createCommand(identity: Identity, aquariumId: string, request: CloudCommandRequest) {
     const access = await this.access(identity, aquariumId);
-    if (!access.role || access.role === "viewer") return null;
+    if (!hasAquariumRole(access.role, requiredRoleForCommand(request.type))) return null;
     const edge = await this.pool.query(
       `SELECT 1 FROM edges WHERE id = $1 AND aquarium_id = $2`,
       [request.edgeId, aquariumId],
@@ -449,7 +753,7 @@ export class PostgresCloudRepository implements CloudRepository {
 
   async registerEdge(identity: Identity, aquariumId: string, name: string) {
     const access = await this.access(identity, aquariumId);
-    if (!access.role || access.role === "viewer") return null;
+    if (!hasAquariumRole(access.role, "manage")) return null;
     const token = randomBytes(32).toString("base64url");
     const tokenHash = createHash("sha256").update(token).digest("hex");
     const result = await this.pool.query<{ id: string }>(
@@ -540,6 +844,27 @@ export class PostgresCloudRepository implements CloudRepository {
           [event.eventId, request.aquariumId, request.edgeId, event.sequence,
            event.type, event.occurredAt, JSON.stringify(event.document)],
         );
+        await client.query(
+          `INSERT INTO notification_deliveries
+             (aquarium_id, event_id, user_id, channel, recipient, payload)
+           SELECT $1, $2, membership.user_id, 'email', users.email,
+             jsonb_build_object(
+               'aquariumName', aquarium.name,
+               'title', COALESCE($3::jsonb->>'title', 'Aquarium alert'),
+               'details', $3::jsonb->>'details'
+             )
+           FROM aquarium_memberships membership
+           JOIN users ON users.id = membership.user_id
+           JOIN aquariums aquarium ON aquarium.id = membership.aquarium_id
+           WHERE membership.aquarium_id = $1
+             AND membership.receive_alarms = true
+             AND users.email IS NOT NULL
+             AND $4 = 'activity'
+             AND $3::jsonb->>'category' = 'alert'
+             AND $3::jsonb->>'action' = 'activated'
+           ON CONFLICT (event_id, user_id, channel) DO NOTHING`,
+          [request.aquariumId, event.eventId, JSON.stringify(event.document), event.type],
+        );
       }
       const acceptedCommandIds: string[] = [];
       for (const result of request.commandResults) {
@@ -581,6 +906,8 @@ export class PostgresCloudRepository implements CloudRepository {
                           THEN 'equipment-control'
                         WHEN type IN ('automation.feed-cycle.start', 'automation.feed-cycle.stop')
                           THEN 'feed-cycle'
+                        WHEN type IN ('routine.run', 'routine.stop', 'routine.finish')
+                          THEN 'routine-control'
                         ELSE type
                       END
                     ORDER BY created_at DESC, command_id DESC
@@ -637,5 +964,45 @@ export class PostgresCloudRepository implements CloudRepository {
     } finally {
       client.release();
     }
+  }
+
+  async claimPendingEmailNotifications(limit = 25): Promise<Array<{
+    id: string;
+    recipient: string;
+    aquariumName: string;
+    title: string;
+    details: string | null;
+  }>> {
+    const result = await this.pool.query<{
+      id: string; recipient: string; aquariumName: string; title: string; details: string | null;
+    }>(
+      `WITH candidates AS (
+         SELECT id FROM notification_deliveries
+         WHERE channel = 'email' AND attempts < 5
+           AND (status = 'pending' OR (status = 'processing' AND updated_at < now() - interval '5 minutes'))
+         ORDER BY created_at LIMIT $1 FOR UPDATE SKIP LOCKED
+       )
+       UPDATE notification_deliveries delivery
+       SET status = 'processing', attempts = attempts + 1, updated_at = now()
+       FROM candidates WHERE delivery.id = candidates.id
+       RETURNING delivery.id, delivery.recipient,
+         delivery.payload->>'aquariumName' AS "aquariumName",
+         delivery.payload->>'title' AS title,
+         delivery.payload->>'details' AS details`,
+      [limit],
+    );
+    return result.rows;
+  }
+
+  async completeEmailNotification(id: string, error?: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE notification_deliveries SET
+         status = CASE WHEN $2::text IS NULL THEN 'sent'
+                       WHEN attempts >= 5 THEN 'failed' ELSE 'pending' END,
+         last_error = $2, delivered_at = CASE WHEN $2::text IS NULL THEN now() ELSE NULL END,
+         updated_at = now()
+       WHERE id = $1`,
+      [id, error?.slice(0, 500) ?? null],
+    );
   }
 }

@@ -8,8 +8,24 @@ import {
   practicalSalinityFromConductivity,
   yinmikWaterMeasurements,
   waterMeasurementStability,
-} from "../src/yinmik-water-equipment.js";
-import { createInitialTwin } from "../src/initial-twin.js";
+} from "../src/water.js";
+import type { AquariumDigitalTwin } from "@modreef/digital-twin";
+
+function createInitialTwin(): AquariumDigitalTwin {
+  return {
+    aquarium: {
+      id: "reef",
+      name: "modREEF",
+      description: "Test aquarium",
+      displayVolumeGallons: 90,
+      systemType: "reef",
+      createdAt: "2026-08-09T00:00:00.000Z",
+    },
+    equipment: [],
+    measurements: [],
+    recommendations: [],
+  };
+}
 
 describe("addYinmikWaterDevice", () => {
   it("registers one physical sensor and one locked measurement endpoint", () => {

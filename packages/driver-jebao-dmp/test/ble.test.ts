@@ -4,7 +4,7 @@ import {
   buildDmpChallengeResponse,
   buildDmpModeFrame,
   buildDmpPowerFrame,
-} from "../src/dmp-ble.js";
+} from "../src/ble.js";
 
 describe("DMP-40 Bluetooth frames", () => {
   it("echoes the captured eight-byte authentication token", () => {
@@ -25,19 +25,19 @@ describe("DMP-40 Bluetooth frames", () => {
     );
   });
 
-  it("encodes flow percentage in the same acknowledged state frame", () => {
+  it("encodes flow percentage in the acknowledged mode frame", () => {
     expect(buildDmpModeFrame(0x11, "M3", 30).toString("hex")).toBe(
       "0000000314000093000000111100000000000001b406381e64",
     );
   });
 
-  it("encodes the selected pulse frequency in the mode frame", () => {
+  it("encodes pulse frequency in the mode frame", () => {
     expect(buildDmpModeFrame(0x12, "M2", 65, 35).toString("hex")).toBe(
       "0000000314000093000000121100000000000001b406284123",
     );
   });
 
-  it("encodes the captured power-on and power-off values", () => {
+  it("encodes the captured power values", () => {
     expect(buildDmpPowerFrame(3, true).toString("hex")).toBe(
       "000000031200009300000003110000000000000000010100",
     );

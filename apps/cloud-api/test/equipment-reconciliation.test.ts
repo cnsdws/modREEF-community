@@ -133,5 +133,7 @@ describe("cloud equipment reconciliation", () => {
     expect(delivery?.text).toContain("WHEN type = ANY($2::text[]) THEN 0");
     expect(delivery?.text).toContain("WHEN type LIKE 'aquarium.event.%' THEN 2");
     expect(delivery?.values[1]).toContain("equipment.set-control-mode");
+    expect(delivery?.values[1]).toContain("routine.run");
+    expect(supersession?.text).toContain("THEN 'routine-control'");
   });
 });

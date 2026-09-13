@@ -118,5 +118,5 @@ jobs:
           artifacts/controller-image/*
           --verify-tag
           --generate-notes
-          --latest
+          --prerelease
           --title "modREEF Controller ${GITHUB_REF_NAME#controller-}"

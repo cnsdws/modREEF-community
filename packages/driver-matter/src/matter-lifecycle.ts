@@ -1,3 +1,4 @@
+/** Serializes fabric mutations so commissioning and deletion cannot overlap. */
 export class MatterLifecycleCoordinator {
   private queue: Promise<void> = Promise.resolve();
 

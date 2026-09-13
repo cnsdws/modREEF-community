@@ -4,7 +4,7 @@ import {
   matterMilliwattHoursToKilowattHours,
   matterMilliwattsToWatts,
   readMatterChannelState,
-} from "../src/matter-controller.js";
+} from "../src/controller.js";
 
 describe("Matter electrical telemetry units", () => {
   it("converts active power from milliwatts to watts", () => {

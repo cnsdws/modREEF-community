@@ -134,6 +134,66 @@ describe("ModReefCloudClient", () => {
       path: "/v1/aquariums/reef%2Fone/edges/edge%2F1/local-authorization",
     });
   });
+
+  it("manages aquarium authorization and alarm preferences", async () => {
+    const member = {
+      userId: "user/2", email: "helper@example.com", role: "control" as const,
+      receiveAlarms: true, joinedAt: "now",
+    };
+    let response: unknown = { members: [member] };
+    const request = vi.fn(async (_request: unknown) => response);
+    const client = new ModReefCloudClient({ request } as unknown as ModReefTransport);
+    expect(await client.listAquariumMembers("reef/one")).toEqual([member]);
+    response = { member };
+    await client.addAquariumMember("reef/one", member.email, "control");
+    expect(request.mock.calls.at(-1)?.[0]).toMatchObject({
+      method: "POST", path: "/v1/aquariums/reef%2Fone/members",
+      body: { email: member.email, role: "control", receiveAlarms: true },
+    });
+    await client.updateAquariumMember("reef/one", "user/2", { receiveAlarms: false });
+    expect(request.mock.calls.at(-1)?.[0]).toMatchObject({
+      method: "PATCH", path: "/v1/aquariums/reef%2Fone/members/user%2F2",
+      body: { receiveAlarms: false },
+    });
+    await client.removeAquariumMember("reef/one", "user/2");
+    expect(request.mock.calls.at(-1)?.[0]).toMatchObject({
+      method: "DELETE", path: "/v1/aquariums/reef%2Fone/members/user%2F2",
+    });
+    await client.resendAquariumInvitation("reef/one", "user/2");
+    expect(request.mock.calls.at(-1)?.[0]).toMatchObject({
+      method: "POST", path: "/v1/aquariums/reef%2Fone/members/user%2F2/resend",
+    });
+    response = { members: [member] };
+    await client.transferAquariumOwnership("reef/one", "user/2");
+    expect(request.mock.calls.at(-1)?.[0]).toMatchObject({
+      method: "POST", path: "/v1/aquariums/reef%2Fone/members/user%2F2/transfer-ownership",
+    });
+    response = { events: [] };
+    await client.listAuthorizationAudit("reef/one");
+    expect(request.mock.calls.at(-1)?.[0]).toMatchObject({
+      method: "GET", path: "/v1/aquariums/reef%2Fone/authorization-audit",
+    });
+  });
+
+  it("exports an aquarium and requests safe account deletion", async () => {
+    let response: unknown = {
+      export: {
+        schemaVersion: "1", exportedAt: "now",
+        aquarium: { id: "reef", name: "Reef", role: "owner", createdAt: "now" },
+        controllers: [], devices: [], equipment: [], events: [], waterAlarmSettings: null,
+        members: [], authorizationAudit: [],
+      },
+    };
+    const request = vi.fn(async (_request: unknown) => response);
+    const client = new ModReefCloudClient({ request } as unknown as ModReefTransport);
+    expect((await client.exportAquarium("reef/one")).schemaVersion).toBe("1");
+    expect(request.mock.calls.at(-1)?.[0]).toMatchObject({
+      method: "GET", path: "/v1/aquariums/reef%2Fone/export",
+    });
+    response = { deleted: true };
+    await client.deleteAccount();
+    expect(request.mock.calls.at(-1)?.[0]).toEqual({ method: "DELETE", path: "/v1/account" });
+  });
 });
 
 describe("FetchModReefTransport", () => {

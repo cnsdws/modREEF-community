@@ -33,6 +33,31 @@ describe("controller reported state", () => {
     } })).toBe(true);
     expect(isEdgeRuntimeState({ feedCycle: { id: "feed-1", status: "unknown" } })).toBe(false);
   });
+
+  it("validates controller-owned routine definitions and execution state", () => {
+    const routine = {
+      id: "routine-1",
+      name: "Maintenance",
+      tasks: [{ id: "task-1", type: "power", equipmentId: "pump-1", enabled: false }],
+      createdAt: "2026-08-29T12:00:00Z",
+      updatedAt: "2026-08-29T12:00:00Z",
+    };
+    expect(isEdgeRuntimeState({
+      feedCycle: null,
+      routines: {
+        definitions: [routine],
+        active: {
+          id: "execution-1", routineId: routine.id, name: routine.name,
+          startedAt: "2026-08-29T12:01:00Z", taskIndex: 0,
+          snapshots: { "pump-1": true }, holding: true,
+        },
+      },
+    })).toBe(true);
+    expect(isEdgeRuntimeState({
+      feedCycle: null,
+      routines: { definitions: [{ ...routine, tasks: [{ id: "bad", type: "unknown" }] }], active: null },
+    })).toBe(false);
+  });
 });
 
 describe("equipment command contracts", () => {

@@ -1,0 +1,27 @@
+{
+  "name": "@modreef/driver-jebao-dmp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./integration": "./src/integration.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modreef/device-integration": "workspace:*",
+    "@modreef/hal": "workspace:*",
+    "@stoprocent/noble": "^2.5.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.7"
+  }
+}

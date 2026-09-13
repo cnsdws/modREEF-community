@@ -20,6 +20,8 @@ ARCHIVE="${WORK_DIR}/release.tar.gz"
 STAGING="${WORK_DIR}/staging"
 BACKUP="${WORK_DIR}/backup"
 SERVICE_USER="modreef"
+RELEASE_PUBLIC_KEY="${MODREEF_RELEASE_PUBLIC_KEY:-/etc/modreef/release-public-key.pem}"
+SIGNATURE_FILE="${WORK_DIR}/release.signature"
 
 write_update_status() {
   local status="$1"
@@ -61,8 +63,10 @@ migrate_device_credentials() {
 parse_manifest() {
   node -e '
     const value = JSON.parse(process.env.MANIFEST_JSON);
-    if (!/^[a-f0-9]{64}$/.test(value.sha256) || !/^https:\/\//.test(value.url)) process.exit(1);
-    process.stdout.write(`${value.sha256} ${value.url}\n`);
+    const signature = value.signature ?? "unsigned";
+    if (!/^[a-f0-9]{64}$/.test(value.sha256) || !/^https:\/\//.test(value.url) ||
+        (signature !== "unsigned" && !/^[A-Za-z0-9+/]{86}==$/.test(signature))) process.exit(1);
+    process.stdout.write(`${value.sha256} ${value.url} ${signature}\n`);
   '
 }
 
@@ -90,7 +94,7 @@ MANIFEST="$(curl --fail --silent --show-error --max-time 15 "${RELEASE_API}")" |
   echo "Qualified release check unavailable; starting installed local controller." >&2
   exit 0
 }
-read -r TARGET_SHA RELEASE_URL < <(
+read -r TARGET_SHA RELEASE_URL RELEASE_SIGNATURE < <(
   MANIFEST_JSON="${MANIFEST}" parse_manifest
 ) || {
   write_update_status "failed" "The qualified release manifest was invalid"
@@ -113,6 +117,26 @@ echo "${TARGET_SHA}  ${ARCHIVE}" | sha256sum --check --status || {
   echo "Qualified release checksum verification failed." >&2
   exit 1
 }
+if [[ -f "${RELEASE_PUBLIC_KEY}" ]]; then
+  if [[ "${RELEASE_SIGNATURE}" == "unsigned" ]]; then
+    write_update_status "failed" "The release was not cryptographically signed" "${TARGET_SHA}"
+    echo "Qualified release signature is missing." >&2
+    exit 1
+  fi
+  printf '%s' "${RELEASE_SIGNATURE}" | base64 --decode > "${SIGNATURE_FILE}"
+  openssl pkeyutl -verify -pubin -rawin \
+    -inkey "${RELEASE_PUBLIC_KEY}" -sigfile "${SIGNATURE_FILE}" -in "${ARCHIVE}" >/dev/null || {
+    write_update_status "failed" "The release signature was invalid" "${TARGET_SHA}"
+    echo "Qualified release signature verification failed." >&2
+    exit 1
+  }
+elif [[ "${MODREEF_REQUIRE_SIGNED_RELEASES:-0}" == "1" ]]; then
+  write_update_status "failed" "No trusted release public key is installed" "${TARGET_SHA}"
+  echo "Signed releases are required, but the trusted public key is missing." >&2
+  exit 1
+else
+  echo "Warning: no trusted release public key is installed; checksum verification only." >&2
+fi
 
 rm -rf -- "${STAGING}" "${BACKUP}"
 mkdir -p "${STAGING}" "${BACKUP}"
@@ -179,6 +203,8 @@ if [[ "${EDGE_WAS_ACTIVE}" == true ]]; then
   sleep 3
   "${APP_DIR}/scripts/edge-health-check.sh"
 fi
+install -d -m 0755 /etc/modreef
+install -m 0644 deploy/edge/release-public-key.pem /etc/modreef/release-public-key.pem
 printf '%s\n' "${TARGET_SHA}" > "${CURRENT_FILE}"
 chown "${SERVICE_USER}:${SERVICE_USER}" "${CURRENT_FILE}"
 write_update_status "succeeded" "Controller software updated successfully" "${TARGET_SHA}" "$(date --iso-8601=seconds)"

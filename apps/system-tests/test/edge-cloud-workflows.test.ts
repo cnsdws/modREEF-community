@@ -73,6 +73,60 @@ class InMemoryCloudRepository implements CloudRepository {
   async restoreAquarium(): Promise<AquariumSummary | null> {
     return null;
   }
+  async listAquariumMembers(_identity: Identity, requestedAquariumId: string) {
+    return requestedAquariumId === aquariumId ? [{
+      userId: "owner",
+      email: "owner@example.com",
+      role: "owner" as const,
+      receiveAlarms: true,
+      joinedAt: "2026-07-29T00:00:00Z",
+      currentUser: true,
+    }] : null;
+  }
+  async addAquariumMember(
+    _identity: Identity,
+    requestedAquariumId: string,
+    email: string,
+    role: "view" | "control" | "program" | "manage",
+    receiveAlarms: boolean,
+  ) {
+    return requestedAquariumId === aquariumId
+      ? { userId: "member", email, role, receiveAlarms, joinedAt: "2026-07-29T00:00:00Z" }
+      : null;
+  }
+  async updateAquariumMember(
+    _identity: Identity,
+    requestedAquariumId: string,
+    userId: string,
+    update: { role?: "view" | "control" | "program" | "manage"; receiveAlarms?: boolean },
+  ) {
+    return requestedAquariumId === aquariumId
+      ? {
+          userId,
+          email: "member@example.com",
+          role: update.role ?? "view" as const,
+          receiveAlarms: update.receiveAlarms ?? true,
+          joinedAt: "2026-07-29T00:00:00Z",
+        }
+      : null;
+  }
+  async removeAquariumMember(_identity: Identity, requestedAquariumId: string) {
+    return requestedAquariumId === aquariumId ? "removed" as const : null;
+  }
+  async resendAquariumInvitation(_identity: Identity, requestedAquariumId: string, userId: string) {
+    return requestedAquariumId === aquariumId
+      ? { userId, email: "member@example.com", role: "view" as const, receiveAlarms: true, joinedAt: "2026-07-29T00:00:00Z", pending: true }
+      : null;
+  }
+  async transferAquariumOwnership(_identity: Identity, requestedAquariumId: string) {
+    return requestedAquariumId === aquariumId ? [] : null;
+  }
+  async listAuthorizationAudit(_identity: Identity, requestedAquariumId: string) {
+    return requestedAquariumId === aquariumId ? [] : null;
+  }
+  async deleteAccount(_identity: Identity) {
+    return { deleted: false as const, ownedAquariumIds: [aquariumId] };
+  }
   async listEdges(_identity: Identity, requestedAquariumId: string): Promise<EdgeSummary[] | null> {
     return requestedAquariumId === aquariumId
       ? [{ id: edgeId, aquariumId, name: "System Test Controller", status: "online", softwareVersion: "0.1.0", lastSeenAt: "2026-07-29T00:00:00Z", localHostname: "system-test", runtimeState: { feedCycle: null } }]

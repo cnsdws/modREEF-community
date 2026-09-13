@@ -168,6 +168,51 @@ describe("Edge cloud synchronization", () => {
     expect(deps.executeStartFeedMode).toHaveBeenCalledWith("command-feed", 300, 120, "A");
   });
 
+  it("reports routines and executes routine commands through cloud sync", async () => {
+    const deps = dependencies();
+    const input = {
+      name: "Maintenance",
+      tasks: [{ id: "task-1", type: "power" as const, equipmentId: "pump-1", enabled: false }],
+    };
+    const executeCreateRoutine = vi.fn(async () => undefined);
+    deps.value.executeCreateRoutine = executeCreateRoutine;
+    deps.value.getRuntimeState = () => ({
+      feedCycle: null,
+      routines: {
+        definitions: [{
+          id: "routine-1", ...input,
+          createdAt: "2026-08-29T12:00:00Z",
+          updatedAt: "2026-08-29T12:00:00Z",
+        }],
+        active: null,
+      },
+    });
+    let request: EdgeSyncRequest | undefined;
+    const transport: EdgeCloudTransport = { exchange: async (value) => {
+      request = value;
+      return {
+        acceptedThroughSequence: 0,
+        acceptedCommandIds: [],
+        serverTime: "2026-08-29T12:01:00Z",
+        commands: [{
+          commandId: "command-routine-create", aquariumId: "aquarium-1",
+          edgeId: "edge-1", equipmentId: "routines", type: "routine.create",
+          payload: { input }, status: "delivered",
+          createdAt: "2026-08-29T12:00:00Z",
+        }],
+      };
+    } };
+
+    await new EdgeCloudSync(config, transport, deps.value).runOnce();
+
+    expect(request?.runtimeState?.routines?.definitions[0]?.name)
+      .toBe("Maintenance");
+    expect(executeCreateRoutine).toHaveBeenCalledWith(
+      "command-routine-create",
+      input,
+    );
+  });
+
   it("requests a qualified controller update through a durable cloud command", async () => {
     const deps = dependencies();
     const transport: EdgeCloudTransport = { exchange: async () => ({

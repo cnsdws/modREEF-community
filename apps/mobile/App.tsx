@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -32,6 +33,7 @@ import {
 import { ModReefHttpError } from "@modreef/cloud-client";
 import {
   buildReefCoachReport,
+  aquariumRoleCapabilities,
   type AquariumSummary,
   type EdgeSummary,
   type ReefCoachReport,
@@ -42,7 +44,10 @@ import { CloudAuthGate, useCloudAuth } from "./src/CloudAuthGate";
 import { CloudAquariumSetup } from "./src/CloudAquariumSetup";
 import { CloudEdgeSetup } from "./src/CloudEdgeSetup";
 import { CommunityControllerDownload } from "./src/CommunityControllerDownload";
-import { isCommunityDownloadPath } from "./src/communityControllerRelease";
+import {
+  communityControllerRelease,
+  isCommunityDownloadPath,
+} from "./src/communityControllerRelease";
 import { dashboardConnectionMode } from "./src/connectionMode";
 import {
   soleControllerForDeviceAdministration,
@@ -104,6 +109,8 @@ import {
 } from "./src/edgeTarget";
 import { OnboardingPanel } from "./src/OnboardingPanel";
 import { ManagedDevicesPanel } from "./src/ManagedDevicesPanel";
+import { AquariumAuthorizationPanel } from "./src/AquariumAuthorizationPanel";
+import { AccountDataActions } from "./src/AccountDataActions";
 import { CircularActionButton } from "./src/CircularActionButton";
 import { FeedModePanel } from "./src/FeedModePanel";
 import { feedCycleTargetControllerIds } from "./src/feedModeReconciliation";
@@ -283,8 +290,13 @@ function Dashboard() {
   const [aquariumListError, setAquariumListError] = useState<string | null>(null);
   const [aquariumLifecycleBusyId, setAquariumLifecycleBusyId] = useState<string | null>(null);
   const [securityExpanded, setSecurityExpanded] = useState(false);
+  const [authorizationExpanded, setAuthorizationExpanded] = useState(false);
   const [aquariumSettingsOpen, setAquariumSettingsOpen] =
     useState(false);
+  const currentAquariumRole = !cloudMode
+    ? "owner"
+    : accountAquariums.find(({ id }) => id === twin.aquarium.id)?.role ?? "view";
+  const currentAquariumCapabilities = aquariumRoleCapabilities[currentAquariumRole];
   const [waterTestsOpen, setWaterTestsOpen] = useState(false);
   const [journalOpen, setJournalOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
@@ -297,6 +309,7 @@ function Dashboard() {
   const pendingWaterIssues = useRef<Record<string, number>>({});
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [routinesOpen, setRoutinesOpen] = useState(false);
+  const [routineControllerId, setRoutineControllerId] = useState<string | null>(null);
   const [edgeAvailability, setEdgeAvailability] =
     useState<EdgeAvailability>("unknown");
   const [acknowledgedAlerts, setAcknowledgedAlerts] =
@@ -956,6 +969,11 @@ function Dashboard() {
     (issue) =>
       !acknowledgedAlerts[issue.id] && !sharedAcknowledgedAlerts[issue.id],
   ).length;
+  const effectiveRoutineControllerId = cloudMode
+    ? reefControllers.find((controller) => controller.id === routineControllerId)?.id ??
+      reefControllers.find((controller) => controller.status === "online")?.id ??
+      reefControllers[0]?.id ?? null
+    : "local";
 
   useEffect(() => {
     if (!dashboardDataLoaded) {
@@ -1973,16 +1991,18 @@ function Dashboard() {
                             <Text style={styles.aquariumSwitchText}>Switch</Text>
                           </Pressable>
                         ) : null}
-                        <Pressable
-                          accessibilityLabel={`Archive ${aquarium.name}`}
-                          accessibilityRole="button"
-                          disabled={aquariumLifecycleBusyId !== null}
-                          onPress={() => confirmArchiveAquarium(aquarium)}
-                        >
-                          <Text style={styles.aquariumArchiveText}>
-                            {aquariumLifecycleBusyId === aquarium.id ? "Working…" : "Archive"}
-                          </Text>
-                        </Pressable>
+                        {aquarium.role === "owner" ? (
+                          <Pressable
+                            accessibilityLabel={`Archive ${aquarium.name}`}
+                            accessibilityRole="button"
+                            disabled={aquariumLifecycleBusyId !== null}
+                            onPress={() => confirmArchiveAquarium(aquarium)}
+                          >
+                            <Text style={styles.aquariumArchiveText}>
+                              {aquariumLifecycleBusyId === aquarium.id ? "Working…" : "Archive"}
+                            </Text>
+                          </Pressable>
+                        ) : null}
                       </View>
                     </View>
                   ))}
@@ -2029,7 +2049,7 @@ function Dashboard() {
                             <Text style={styles.aquariumAccountName}>{aquarium.name}</Text>
                             <Text style={styles.aquariumAccountRole}>Archived</Text>
                           </View>
-                          <Pressable
+                          {aquarium.role === "owner" ? <Pressable
                             accessibilityLabel={`Restore ${aquarium.name}`}
                             accessibilityRole="button"
                             disabled={aquariumLifecycleBusyId !== null}
@@ -2038,7 +2058,7 @@ function Dashboard() {
                             <Text style={styles.aquariumSwitchText}>
                               {aquariumLifecycleBusyId === aquarium.id ? "Working…" : "Restore"}
                             </Text>
-                          </Pressable>
+                          </Pressable> : null}
                         </View>
                       ))}
                     </View>
@@ -2103,7 +2123,7 @@ function Dashboard() {
             ) : (
               <View style={styles.inlineNameDisplay}>
                 <Text style={styles.aquariumNameText}>{twin.aquarium.name}</Text>
-                <Pressable
+                {currentAquariumCapabilities.manageUsers ? <Pressable
                   accessibilityLabel="Edit aquarium name"
                   accessibilityRole="button"
                   hitSlop={8}
@@ -2116,7 +2136,7 @@ function Dashboard() {
                   style={styles.inlineNameAction}
                 >
                   <Text style={styles.inlineNamePencil}>✎</Text>
-                </Pressable>
+                </Pressable> : null}
               </View>
             )}
 
@@ -2202,7 +2222,7 @@ function Dashboard() {
                             ) : (
                               <View style={styles.reefControllerNameDisplay}>
                                 <Text style={styles.reefControllerName}>{displayName}</Text>
-                                <Pressable
+                                {currentAquariumCapabilities.manageUsers ? <Pressable
                                   accessibilityLabel={`Edit ${displayName} name`}
                                   accessibilityRole="button"
                                   hitSlop={8}
@@ -2215,11 +2235,11 @@ function Dashboard() {
                                   style={styles.inlineNameAction}
                                 >
                                   <Text style={styles.inlineNamePencil}>✎</Text>
-                                </Pressable>
+                                </Pressable> : null}
                               </View>
                             )}
                           </View>
-                          <Pressable
+                          {currentAquariumCapabilities.manageUsers ? <Pressable
                             accessibilityLabel={`Controller settings for ${displayName}`}
                             accessibilityRole="button"
                             onPress={() => setControllerActionMenuId((current) =>
@@ -2228,7 +2248,7 @@ function Dashboard() {
                             style={styles.reefControllerGearButton}
                           >
                             <GearIcon />
-                          </Pressable>
+                          </Pressable> : null}
                         </View>
                         <Text style={styles.reefControllerDetails}>
                           {isOnline ? "Online" : "Offline"}
@@ -2474,7 +2494,7 @@ function Dashboard() {
                             <Text style={styles.cloudInventoryDeviceName}>
                               {group.deviceName}
                             </Text>
-                            {group.controllerId && group.deviceId ? (
+                            {currentAquariumCapabilities.manageUsers && group.controllerId && group.deviceId ? (
                               <Pressable
                                 accessibilityLabel={`Edit ${group.deviceName} name`}
                                 accessibilityRole="button"
@@ -2491,7 +2511,7 @@ function Dashboard() {
                               </Pressable>
                             ) : null}
                           </View>
-                          {group.controllerId && group.deviceId ? (
+                          {currentAquariumCapabilities.manageUsers && group.controllerId && group.deviceId ? (
                             <View style={styles.cloudInventoryActions}>
                               <Pressable
                                 accessibilityLabel={`Delete ${group.deviceName}`}
@@ -2561,6 +2581,29 @@ function Dashboard() {
             )}
           </View>
 
+          {cloudMode ? (
+            <View style={styles.aquariumSettingsSection}>
+              <Pressable
+                accessibilityLabel={`${authorizationExpanded ? "Collapse" : "Expand"} authorization`}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: authorizationExpanded }}
+                onPress={() => setAuthorizationExpanded((current) => !current)}
+                style={styles.devicesSectionHeader}
+              >
+                <Text style={styles.cloudInventoryDisclosure}>
+                  {authorizationExpanded ? "▾" : "▸"}
+                </Text>
+                <Text style={styles.aquariumSettingsSectionTitle}>Authorization</Text>
+              </Pressable>
+              {authorizationExpanded ? (
+                <AquariumAuthorizationPanel
+                  aquariumId={twin.aquarium.id}
+                  currentRole={currentAquariumRole}
+                />
+              ) : null}
+            </View>
+          ) : null}
+
           {cloudMode && cloudAuth ? (
             <View style={styles.aquariumSettingsSection}>
               <Pressable
@@ -2618,16 +2661,21 @@ function Dashboard() {
             <View style={styles.aquariumSettingsSection}>
               <Text style={styles.aquariumSettingsSectionTitle}>Actions</Text>
               <Text style={styles.aquariumSettingsSectionSummary}>
-                Controller and account actions.
+                Controller software and account actions.
               </Text>
               <View style={styles.settingsActionRow}>
-                {Platform.OS !== "web" && selectedLocalControllerId ? (
+                <AccountDataActions
+                  aquariumId={twin.aquarium.id}
+                  aquariumName={twin.aquarium.name}
+                  onAccountDeleted={cloudAuth.signOut}
+                />
+                {currentAquariumCapabilities.manageUsers && Platform.OS !== "web" && selectedLocalControllerId ? (
                   <OnboardingPanel
                     compact
                     onDeviceConnected={refreshAfterDeviceConnected}
                   />
                 ) : null}
-                {Platform.OS !== "web" ? (
+                {currentAquariumCapabilities.manageUsers && Platform.OS !== "web" ? (
                   <Pressable
                     accessibilityLabel="Add Reef Controller"
                     accessibilityRole="button"
@@ -2636,6 +2684,20 @@ function Dashboard() {
                   >
                     <Text style={styles.settingsActionText}>
                       + Add Reef Controller
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {Platform.OS === "web" ? (
+                  <Pressable
+                    accessibilityLabel="Controller Downloads"
+                    accessibilityRole="link"
+                    onPress={() => void Linking.openURL(
+                      communityControllerRelease.downloadPageUrl,
+                    )}
+                    style={styles.settingsActionButton}
+                  >
+                    <Text style={styles.settingsActionText}>
+                      Controller Downloads
                     </Text>
                   </Pressable>
                 ) : null}
@@ -2680,7 +2742,7 @@ function Dashboard() {
             onPress={() => setScheduleOpen(true)}
             desktop={isDesktopWeb}
           />
-          {Platform.OS !== "web" && (!cloudMode || selectedLocalControllerId) ? (
+          {!cloudMode || reefControllers.length > 0 ? (
             <SystemAction
               icon={<RoutinesIcon />}
               label="Routines"
@@ -2749,6 +2811,7 @@ function Dashboard() {
 
         {!isWideLayout ? (
           <DashboardActivityColumn
+            canControl={currentAquariumCapabilities.control}
             cloudMode={cloudMode}
             controllers={cloudMode ? reefControllers : [{
               id: "local", aquariumId: twin.aquarium.id, name: "Reef Controller",
@@ -2798,12 +2861,13 @@ function Dashboard() {
                     : "Unlock equipment layout"
                 }
                 accessibilityRole="button"
+                disabled={!currentAquariumCapabilities.program}
                 onPress={toggleEquipmentLayout}
                 style={({ pressed }) => ({
                   alignItems: "center",
                   height: 32,
                   justifyContent: "center",
-                  opacity: pressed ? 0.7 : 1,
+                  opacity: !currentAquariumCapabilities.program ? 0.35 : pressed ? 0.7 : 1,
                   width: 32,
                 })}
               >
@@ -2977,8 +3041,10 @@ function Dashboard() {
                               key={mode}
                               accessibilityState={{
                                 busy,
+                                disabled: !currentAquariumCapabilities.control,
                                 selected: active,
                               }}
+                              disabled={!currentAquariumCapabilities.control}
                               onPress={(event) => {
                                 event.stopPropagation();
                                 if (active) return;
@@ -3024,6 +3090,9 @@ function Dashboard() {
                                   : undefined,
                                 active && mode === "on"
                                   ? styles.modeSegmentOn
+                                  : undefined,
+                                !currentAquariumCapabilities.control
+                                  ? styles.buttonDisabled
                                   : undefined,
                               ]}
                             >
@@ -3258,7 +3327,7 @@ function Dashboard() {
                       <Text style={styles.detailName}>
                         {selectedEquipment.name}
                       </Text>
-                      <Pressable
+                      {currentAquariumCapabilities.program ? <Pressable
                         accessibilityLabel="Edit equipment name"
                         accessibilityRole="button"
                         onPress={beginEditingEquipment}
@@ -3266,7 +3335,7 @@ function Dashboard() {
                         style={styles.inlineNameAction}
                       >
                         <Text style={styles.inlineNamePencil}>✎</Text>
-                      </Pressable>
+                      </Pressable> : null}
                     </View>
                   )}
                 </View>
@@ -3322,7 +3391,15 @@ function Dashboard() {
                 </Text>
               )}
 
-              {isDmpWavemaker(selectedEquipment) ? (
+              {!currentAquariumCapabilities.program ? (
+                <View style={styles.readOnlyNotice}>
+                  <Text style={styles.readOnlyNoticeText}>
+                    {currentAquariumRole === "control"
+                      ? "Control access can operate this equipment from the dashboard. Program access is required to change its configuration."
+                      : "This aquarium is view only."}
+                  </Text>
+                </View>
+              ) : isDmpWavemaker(selectedEquipment) ? (
                 <WavemakerProgramPanel
                   equipment={selectedEquipment}
                   settingsIcon={<GearIcon />}
@@ -3517,6 +3594,7 @@ function Dashboard() {
 
         {isWideLayout ? (
           <DashboardActivityColumn
+            canControl={currentAquariumCapabilities.control}
             cloudMode={cloudMode}
             controllers={cloudMode ? reefControllers : [{
               id: "local", aquariumId: twin.aquarium.id, name: "Reef Controller",
@@ -3737,14 +3815,52 @@ function Dashboard() {
               />
             </View>
             <ScrollView contentContainerStyle={styles.journalScreenContent}>
-              <RoutinesPanel
-                equipment={cloudMode
-                  ? twin.equipment.filter(
-                      (equipment) =>
-                        controllerIds[equipment.id] === selectedLocalControllerId,
-                    )
-                  : twin.equipment}
-              />
+              {cloudMode && reefControllers.length > 1 ? (
+                <View style={styles.routineControllerPicker}>
+                  <Text style={styles.routineControllerPickerLabel}>
+                    REEF CONTROLLER
+                  </Text>
+                  <View style={styles.routineControllerChoices}>
+                    {reefControllers.map((controller) => {
+                      const selected = controller.id === effectiveRoutineControllerId;
+                      return (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityState={{ selected }}
+                          key={controller.id}
+                          onPress={() => setRoutineControllerId(controller.id)}
+                          style={[
+                            styles.routineControllerChoice,
+                            selected ? styles.routineControllerChoiceSelected : undefined,
+                          ]}
+                        >
+                          <Text style={[
+                            styles.routineControllerChoiceText,
+                            selected ? styles.routineControllerChoiceTextSelected : undefined,
+                          ]}>
+                            {controllerDisplayName(controller)}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ) : null}
+              {effectiveRoutineControllerId ? (
+                <RoutinesPanel
+                  controllerId={effectiveRoutineControllerId}
+                  equipment={cloudMode
+                    ? twin.equipment.filter(
+                        (equipment) =>
+                          controllerIds[equipment.id] === effectiveRoutineControllerId,
+                      )
+                    : twin.equipment}
+                />
+              ) : (
+                <Text style={styles.emptyStateText}>
+                  Add a Reef Controller before creating routines.
+                </Text>
+              )}
             </ScrollView>
           </SafeAreaView>
         </Modal>
@@ -3872,6 +3988,7 @@ function WorkspaceCloseButton({
 }
 
 function DashboardActivityColumn({
+  canControl,
   cloudMode,
   controllers,
   desktop,
@@ -3882,6 +3999,7 @@ function DashboardActivityColumn({
   onStartTest,
   wide,
 }: {
+  canControl: boolean;
   cloudMode: boolean;
   controllers: EdgeSummary[];
   desktop: boolean;
@@ -3956,13 +4074,15 @@ function DashboardActivityColumn({
         </View>
       </View>
 
-      <FeedModePanel
-        cloudMode={cloudMode}
-        controllers={controllers}
-        targetControllerIds={feedControllerIds}
-        settingsIcon={<GearIcon />}
-        showReconnectNotice
-      />
+      <View pointerEvents={canControl ? "auto" : "none"} style={!canControl ? { opacity: 0.5 } : undefined}>
+        <FeedModePanel
+          cloudMode={cloudMode}
+          controllers={controllers}
+          targetControllerIds={feedControllerIds}
+          settingsIcon={<GearIcon />}
+          showReconnectNotice
+        />
+      </View>
 
       <Text style={[
         styles.sectionTitle,
@@ -4935,6 +5055,19 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginBottom: 16,
   },
+  readOnlyNotice: {
+    backgroundColor: "#061D34",
+    borderColor: "#234968",
+    borderRadius: 10,
+    borderWidth: 1,
+    marginTop: 14,
+    padding: 12,
+  },
+  readOnlyNoticeText: {
+    color: "#9FB4C8",
+    fontSize: 12,
+    lineHeight: 18,
+  },
   settingsDisclosureHeader: {
     alignItems: "center",
     flexDirection: "row",
@@ -5325,6 +5458,59 @@ const styles = StyleSheet.create({
     maxWidth: 900,
     padding: 22,
     width: "100%",
+  },
+
+  routineControllerPicker: {
+    backgroundColor: "#0A2949",
+    borderColor: "#153E63",
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 9,
+    marginBottom: 16,
+    padding: 14,
+  },
+
+  routineControllerPickerLabel: {
+    color: "#64809A",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+
+  routineControllerChoices: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+
+  routineControllerChoice: {
+    borderColor: "#245274",
+    borderRadius: 9,
+    borderWidth: 1,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+  },
+
+  routineControllerChoiceSelected: {
+    backgroundColor: "#20B7EC",
+    borderColor: "#20B7EC",
+  },
+
+  routineControllerChoiceText: {
+    color: "#B8CADB",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+
+  routineControllerChoiceTextSelected: {
+    color: "#02172B",
+  },
+
+  emptyStateText: {
+    color: "#8FA4BF",
+    fontSize: 14,
+    paddingVertical: 24,
+    textAlign: "center",
   },
 
   eyebrow: {
