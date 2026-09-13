@@ -5,10 +5,12 @@ import { CloudApplication } from "./application.js";
 import { OidcAuthenticator } from "./auth.js";
 import { PostgresCloudRepository } from "./postgres-repository.js";
 import { OpenAIReefCoachProvider } from "./reef-coach-provider.js";
+import { ResendInvitationNotifier } from "./invitation-notifier.js";
 import {
   PostgresEdgeReleaseStore,
   validPublishToken,
   validReleaseMetadata,
+  validReleaseSignature,
 } from "./edge-release-store.js";
 
 const required = (name: string): string => {
@@ -19,8 +21,16 @@ const required = (name: string): string => {
 
 const pool = new Pool({ connectionString: required("MODREEF_DATABASE_URL") });
 const edgeReleaseStore = new PostgresEdgeReleaseStore(pool);
+const repository = new PostgresCloudRepository(pool);
+const notificationSender = process.env.RESEND_API_KEY && process.env.MODREEF_INVITATION_FROM_EMAIL
+  ? new ResendInvitationNotifier(
+    process.env.RESEND_API_KEY,
+    process.env.MODREEF_INVITATION_FROM_EMAIL,
+    process.env.MODREEF_PUBLIC_APP_URL ?? "https://www.modreef.net",
+  )
+  : undefined;
 const app = new CloudApplication(
-  new PostgresCloudRepository(pool),
+  repository,
   new OidcAuthenticator({
     issuer: required("MODREEF_OIDC_ISSUER"),
     audience: required("MODREEF_OIDC_AUDIENCE"),
@@ -32,6 +42,7 @@ const app = new CloudApplication(
       process.env.MODREEF_REEF_COACH_MODEL ?? "gpt-5.6-sol",
     )
     : undefined,
+  notificationSender,
 );
 
 const allowedOrigins = new Set(
@@ -66,6 +77,9 @@ const edgeRelease = await readFile(
 const edgeReleaseSha256 = await readFile(
   new URL("../edge-release.sha256", import.meta.url), "utf8",
 ).then((value) => value.trim()).catch(() => null);
+const edgeReleaseSignature = await readFile(
+  new URL("../edge-release.signature", import.meta.url), "utf8",
+).then((value) => value.trim()).catch(() => null);
 const publicApiUrl = (process.env.MODREEF_PUBLIC_API_URL ?? "https://api.modreef.net").replace(/\/$/, "");
 
 async function readRequestBody(
@@ -95,16 +109,22 @@ const server = createServer(async (request, response) => {
     (request.method === "GET" || request.method === "HEAD") &&
     requestPath === "/v1/releases/edge/latest"
   ) {
-    if (!edgeRelease || !edgeReleaseSha256) {
+    const stored = await edgeReleaseStore.getRelease("production").catch(() => null);
+    const archive = stored?.archive ?? edgeRelease;
+    const sha256 = stored?.sha256 ?? edgeReleaseSha256;
+    if (!archive || !sha256) {
       response.writeHead(503, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: "Edge release is unavailable" }));
       return;
     }
     const body = JSON.stringify({
       channel: "production",
-      sha256: edgeReleaseSha256,
-      size: edgeRelease.length,
-      url: "https://api.modreef.net/v1/releases/edge/archive",
+      sha256,
+      size: archive.length,
+      signature: stored?.signature ?? edgeReleaseSignature,
+      sourceCommit: stored?.sourceCommit,
+      publishedAt: stored?.publishedAt,
+      url: `${publicApiUrl}/v1/releases/edge/archive`,
     });
     response.writeHead(200, {
       "cache-control": "no-store",
@@ -118,7 +138,7 @@ const server = createServer(async (request, response) => {
     (request.method === "GET" || request.method === "HEAD") &&
     requestPath === "/v1/releases/edge/staging/latest"
   ) {
-    const release = await edgeReleaseStore.getStagingRelease().catch((error) => {
+    const release = await edgeReleaseStore.getRelease("staging").catch((error) => {
       console.error("Could not load staging Edge release:", error);
       return undefined;
     });
@@ -138,6 +158,7 @@ const server = createServer(async (request, response) => {
       size: release.size,
       sourceCommit: release.sourceCommit,
       publishedAt: release.publishedAt,
+      signature: release.signature,
       url: `${publicApiUrl}/v1/releases/edge/staging/archive`,
     });
     response.writeHead(200, {
@@ -152,7 +173,7 @@ const server = createServer(async (request, response) => {
     (request.method === "GET" || request.method === "HEAD") &&
     requestPath === "/v1/releases/edge/staging/archive"
   ) {
-    const release = await edgeReleaseStore.getStagingRelease().catch((error) => {
+    const release = await edgeReleaseStore.getRelease("staging").catch((error) => {
       console.error("Could not load staging Edge archive:", error);
       return undefined;
     });
@@ -191,9 +212,11 @@ const server = createServer(async (request, response) => {
     }
     const sha256 = request.headers["x-modreef-release-sha256"];
     const sourceCommit = request.headers["x-modreef-source-commit"];
+    const signature = request.headers["x-modreef-release-signature"];
     const shaValue = Array.isArray(sha256) ? sha256[0] : sha256;
     const commitValue = Array.isArray(sourceCommit) ? sourceCommit[0] : sourceCommit;
-    if (!validReleaseMetadata(shaValue, commitValue)) {
+    const signatureValue = Array.isArray(signature) ? signature[0] : signature;
+    if (!validReleaseMetadata(shaValue, commitValue) || !validReleaseSignature(signatureValue)) {
       response.writeHead(400, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: "Invalid release metadata" }));
       return;
@@ -209,6 +232,7 @@ const server = createServer(async (request, response) => {
         sha256: shaValue,
         sourceCommit: commitValue!,
         archive,
+        signature: signatureValue!,
       });
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({
@@ -217,6 +241,7 @@ const server = createServer(async (request, response) => {
         size: release.size,
         sourceCommit: release.sourceCommit,
         publishedAt: release.publishedAt,
+        signature: release.signature,
       }));
     } catch (error) {
       const invalidArchive = error instanceof Error &&
@@ -229,11 +254,51 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
+  if (request.method === "POST" && requestPath === "/v1/releases/edge/promote") {
+    const token = request.headers.authorization?.startsWith("Bearer ")
+      ? request.headers.authorization.slice(7)
+      : undefined;
+    const sourceCommit = request.headers["x-modreef-source-commit"];
+    const commitValue = Array.isArray(sourceCommit) ? sourceCommit[0] : sourceCommit;
+    if (!validPublishToken(token, process.env.MODREEF_RELEASE_PUBLISH_TOKEN)) {
+      response.writeHead(401, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "Invalid release publication token" }));
+      return;
+    }
+    if (!commitValue || !/^[a-f0-9]{40}$/.test(commitValue)) {
+      response.writeHead(400, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "Invalid source commit" }));
+      return;
+    }
+    const release = await edgeReleaseStore.promoteStagingRelease(commitValue).catch((error) => {
+      console.error("Could not promote Edge release:", error);
+      return undefined;
+    });
+    if (release === undefined) {
+      response.writeHead(500, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "Could not promote Edge release" }));
+      return;
+    }
+    if (!release) {
+      response.writeHead(409, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "The signed staging release does not match this commit" }));
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({
+      channel: release.channel, sha256: release.sha256, size: release.size,
+      sourceCommit: release.sourceCommit, publishedAt: release.publishedAt,
+      signature: release.signature,
+    }));
+    return;
+  }
   if (
     (request.method === "GET" || request.method === "HEAD") &&
     requestPath === "/v1/releases/edge/archive"
   ) {
-    if (!edgeRelease) {
+    const stored = await edgeReleaseStore.getRelease("production").catch(() => null);
+    const archive = stored?.archive ?? edgeRelease;
+    if (!archive) {
       response.writeHead(503, { "content-type": "application/json" });
       response.end(JSON.stringify({ error: "Edge release is unavailable" }));
       return;
@@ -241,10 +306,10 @@ const server = createServer(async (request, response) => {
     response.writeHead(200, {
       "cache-control": "no-store",
       "content-disposition": "attachment; filename=modreef-edge-release.tar.gz",
-      "content-length": edgeRelease.length,
+      "content-length": archive.length,
       "content-type": "application/gzip",
     });
-    response.end(request.method === "HEAD" ? undefined : edgeRelease);
+    response.end(request.method === "HEAD" ? undefined : archive);
     return;
   }
   if (
@@ -328,6 +393,38 @@ server.headersTimeout = 10_000;
 
 const port = Number(process.env.PORT ?? 3001);
 server.listen(port, () => console.log(`modREEF Cloud API listening on port ${port}`));
+
+let notificationWorkerRunning = false;
+async function deliverPendingNotifications(): Promise<void> {
+  if (!notificationSender?.sendAlert || notificationWorkerRunning) return;
+  notificationWorkerRunning = true;
+  try {
+    const pending = await repository.claimPendingEmailNotifications();
+    for (const delivery of pending) {
+      try {
+        await notificationSender.sendAlert({
+          aquariumName: delivery.aquariumName,
+          email: delivery.recipient,
+          title: delivery.title,
+          details: delivery.details,
+        });
+        await repository.completeEmailNotification(delivery.id);
+      } catch (error) {
+        await repository.completeEmailNotification(
+          delivery.id,
+          error instanceof Error ? error.message : "Notification delivery failed",
+        );
+      }
+    }
+  } catch (error) {
+    console.error("Notification worker failed:", error instanceof Error ? error.message : "unknown error");
+  } finally {
+    notificationWorkerRunning = false;
+  }
+}
+const notificationTimer = setInterval(() => void deliverPendingNotifications(), 15_000);
+notificationTimer.unref();
+void deliverPendingNotifications();
 
 const shutdown = () => {
   console.log("modREEF Cloud API shutting down");

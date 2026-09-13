@@ -41,16 +41,19 @@ regression before closing it.
 
 Production deploys from the `production` branch, not the moving tip of a
 feature branch or `develop`. Run the **Release candidate** workflow with the
-full commit SHA. It reruns the complete software gates, builds a deterministic
-Edge archive, and publishes that exact commit to the staging channel. It does
-not move `production`.
+full commit SHA. It reruns the complete software gates, builds the exact Cloud
+API and web Dockerfiles used by Railway, builds a deterministic Edge archive,
+and publishes that exact commit to the staging channel. It does not move
+`production`. A candidate cannot reach staging when either production container
+fails to build.
 
 Assign only a disposable test controller to **Staging** in System settings,
 request an update, and complete the physical acceptance pass. After it passes,
 run **Promote production** with the same full commit SHA. That workflow refuses
 to promote a commit that is not the currently published staging candidate and
-advances `production` without allowing a non-fast-forward update. Railway waits
-for the commit's GitHub checks before deploying it.
+advances `production` without allowing a non-fast-forward update. Railway then
+deploys the same commit whose production containers were built during
+qualification.
 
 Changing a controller back to **Production** immediately requests an update to
 the current production archive. A new controller and an upgraded controller

@@ -9,6 +9,7 @@ import type {
 } from "@modreef/digital-twin";
 
 export const yinmikWaterDriverPrefix = "modreef.yinmik-water";
+export { yinmikWaterProductId } from "./identity.js";
 
 export function isWaterProbeCalibration(value: unknown): value is WaterProbeCalibration {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;

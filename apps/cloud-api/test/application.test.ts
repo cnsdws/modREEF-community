@@ -12,7 +12,7 @@ const aquariums: AquariumSummary[] = [
   { id: "reef-b", name: "Bob Reef", role: "owner", createdAt: "2026-01-01T00:00:00Z" },
 ];
 const memberships: Record<string, string[]> = { alice: ["reef-a"], bob: ["reef-b"], charlie: ["reef-a"] };
-const roles: Record<string, "owner" | "admin" | "viewer"> = { alice: "owner", bob: "owner", charlie: "viewer" };
+const roles: Record<string, import("@modreef/api-contract").AquariumRole> = { alice: "owner", bob: "owner", charlie: "view" };
 
 class FixtureAuth implements Authenticator {
   async authenticate(value: string | undefined): Promise<Identity | null> {
@@ -41,12 +41,12 @@ class FixtureRepository implements CloudRepository {
   }
   async renameAquarium(identity: Identity, id: string, name: string) {
     const aquarium = aquariums.find((candidate) => candidate.id === id);
-    return this.allowed(identity, id) && roles[identity.subject] !== "viewer" && aquarium
+    return this.allowed(identity, id) && roles[identity.subject] !== "view" && aquarium
       ? { ...aquarium, name, role: roles[identity.subject]! }
       : null;
   }
   async archiveAquarium(identity: Identity, id: string) {
-    if (!this.allowed(identity, id) || roles[identity.subject] === "viewer") return null;
+    if (!this.allowed(identity, id) || roles[identity.subject] === "view") return null;
     if (id === "reef-a") return { status: "blocked" as const, controllerIds: ["edge-1"] };
     return {
       status: "archived" as const,
@@ -55,20 +55,64 @@ class FixtureRepository implements CloudRepository {
   }
   async restoreAquarium(identity: Identity, id: string) {
     const aquarium = aquariums.find((item) => item.id === id);
-    return this.allowed(identity, id) && roles[identity.subject] !== "viewer" && aquarium
+    return this.allowed(identity, id) && roles[identity.subject] !== "view" && aquarium
       ? { ...aquarium, role: roles[identity.subject]!, archivedAt: null }
       : null;
+  }
+  async listAquariumMembers(identity: Identity, id: string) {
+    if (!this.allowed(identity, id)) return null;
+    return [{
+      userId: identity.subject,
+      email: `${identity.subject}@example.com`,
+      role: roles[identity.subject]!,
+      receiveAlarms: true,
+      joinedAt: "2026-01-01T00:00:00Z",
+      currentUser: true,
+    }];
+  }
+  async addAquariumMember(identity: Identity, id: string, email: string, role: "view" | "control" | "program" | "manage", receiveAlarms: boolean) {
+    if (!this.allowed(identity, id) || roles[identity.subject] !== "owner") return "forbidden" as const;
+    return { userId: "new-user", email, role, receiveAlarms, joinedAt: "2026-01-01T00:00:00Z" };
+  }
+  async updateAquariumMember(identity: Identity, id: string, userId: string, update: { role?: "view" | "control" | "program" | "manage"; receiveAlarms?: boolean }) {
+    if (!this.allowed(identity, id)) return null;
+    if (identity.subject !== userId && roles[identity.subject] !== "owner") return "forbidden" as const;
+    return {
+      userId, email: `${userId}@example.com`, role: update.role ?? roles[userId] ?? "view",
+      receiveAlarms: update.receiveAlarms ?? true, joinedAt: "2026-01-01T00:00:00Z",
+      currentUser: identity.subject === userId,
+    };
+  }
+  async removeAquariumMember(identity: Identity, id: string, userId: string) {
+    if (!this.allowed(identity, id) || roles[identity.subject] !== "owner") return "forbidden" as const;
+    return userId === "alice" ? null : "removed" as const;
+  }
+  async resendAquariumInvitation(identity: Identity, id: string, userId: string) {
+    if (!this.allowed(identity, id) || roles[identity.subject] !== "owner") return "forbidden" as const;
+    return { userId, email: `${userId}@example.com`, role: "view" as const, receiveAlarms: true, joinedAt: "2026-01-01T00:00:00Z", pending: true };
+  }
+  async transferAquariumOwnership(identity: Identity, id: string, userId: string) {
+    if (!this.allowed(identity, id) || roles[identity.subject] !== "owner") return "forbidden" as const;
+    return userId === "new-user" ? [] : null;
+  }
+  async listAuthorizationAudit(identity: Identity, id: string) {
+    return this.allowed(identity, id) && roles[identity.subject] === "owner" ? [] : null;
+  }
+  async deleteAccount(identity: Identity) {
+    return roles[identity.subject] === "owner"
+      ? { deleted: false as const, ownedAquariumIds: memberships[identity.subject] ?? [] }
+      : { deleted: true as const };
   }
   async listEdges(identity: Identity, id: string): Promise<EdgeSummary[] | null> {
     return this.allowed(identity, id) ? [{ id: "edge-1", aquariumId: id, name: "Pi", status: "online", softwareVersion: "0.1", lastSeenAt: null, localHostname: null, runtimeState: { feedCycle: null } }] : null;
   }
   async renameEdge(identity: Identity, aquariumId: string, edgeId: string, name: string) {
-    return this.allowed(identity, aquariumId) && roles[identity.subject] !== "viewer" && edgeId === "edge-1"
+    return this.allowed(identity, aquariumId) && roles[identity.subject] !== "view" && edgeId === "edge-1"
       ? { id: edgeId, aquariumId, name, status: "online" as const, softwareVersion: "0.1", lastSeenAt: null, localHostname: null, runtimeState: { feedCycle: null } }
       : null;
   }
   async retireEdge(identity: Identity, aquariumId: string, edgeId: string) {
-    if (!this.allowed(identity, aquariumId) || roles[identity.subject] === "viewer") return null;
+    if (!this.allowed(identity, aquariumId) || roles[identity.subject] === "view") return null;
     if (edgeId === "edge-with-device") {
       return {
         status: "blocked" as const,
@@ -81,12 +125,12 @@ class FixtureRepository implements CloudRepository {
       : null;
   }
   async reprovisionEdge(identity: Identity, aquariumId: string, edgeId: string) {
-    return this.allowed(identity, aquariumId) && roles[identity.subject] !== "viewer"
+    return this.allowed(identity, aquariumId) && roles[identity.subject] !== "view"
       ? { edgeId, aquariumId, token: "r".repeat(43) }
       : null;
   }
   async createLocalAuthorization(identity: Identity, aquariumId: string, _edgeId: string) {
-    return this.allowed(identity, aquariumId) && roles[identity.subject] !== "viewer"
+    return this.allowed(identity, aquariumId) && roles[identity.subject] !== "view"
       ? { grant: "signed-grant", expiresAt: "2026-01-01T00:01:00Z" }
       : null;
   }
@@ -103,7 +147,7 @@ class FixtureRepository implements CloudRepository {
     return this.allowed(identity, id) ? this.waterAlarmSettings : null;
   }
   async saveWaterAlarmSettings(identity: Identity, id: string, rules: import("@modreef/api-contract").WaterAlarmRules) {
-    if (!this.allowed(identity, id) || roles[identity.subject] === "viewer") return null;
+    if (!this.allowed(identity, id) || roles[identity.subject] === "view") return null;
     this.waterAlarmSettings = {
       aquariumId: id, rules, revision: (this.waterAlarmSettings?.revision ?? 0) + 1,
       updatedAt: "2026-08-10T12:00:00Z",
@@ -111,7 +155,7 @@ class FixtureRepository implements CloudRepository {
     return this.waterAlarmSettings;
   }
   async createCommand(identity: Identity, aquariumId: string, request: CloudCommandRequest): Promise<CloudCommand | null> {
-    return this.allowed(identity, aquariumId) && roles[identity.subject] !== "viewer"
+    return this.allowed(identity, aquariumId) && roles[identity.subject] !== "view"
       ? { ...request, aquariumId, status: "queued", createdAt: "2026-01-01T00:00:00Z" }
       : null;
   }
@@ -125,7 +169,7 @@ class FixtureRepository implements CloudRepository {
       : null;
   }
   async registerEdge(identity: Identity, aquariumId: string, _name: string) {
-    return this.allowed(identity, aquariumId) && roles[identity.subject] !== "viewer"
+    return this.allowed(identity, aquariumId) && roles[identity.subject] !== "view"
       ? { edgeId: "edge-new", aquariumId, token: "shown-once" }
       : null;
   }
@@ -158,6 +202,87 @@ describe("cloud aquarium tenancy", () => {
     const result = await app.handle({ method: "GET", path: "/v1/aquariums", authorization: "Bearer alice" });
     expect(result.status).toBe(200);
     expect(result.body).toEqual({ aquariums: [aquariums[0]] });
+  });
+
+  it("lets aquarium owners add and remove users with an explicit access level", async () => {
+    const added = await app.handle({
+      method: "POST", path: "/v1/aquariums/reef-a/members", authorization: "Bearer alice",
+      body: { email: "new@example.com", role: "program", receiveAlarms: true },
+    });
+    expect(added).toMatchObject({ status: 201, body: { member: { role: "program", receiveAlarms: true } } });
+    expect((await app.handle({
+      method: "DELETE", path: "/v1/aquariums/reef-a/members/new-user", authorization: "Bearer alice",
+    })).status).toBe(200);
+  });
+
+  it("lets every member choose alarm delivery without granting user management", async () => {
+    const preference = await app.handle({
+      method: "PATCH", path: "/v1/aquariums/reef-a/members/charlie", authorization: "Bearer charlie",
+      body: { receiveAlarms: false },
+    });
+    expect(preference).toMatchObject({ status: 200, body: { member: { receiveAlarms: false } } });
+    const add = await app.handle({
+      method: "POST", path: "/v1/aquariums/reef-a/members", authorization: "Bearer charlie",
+      body: { email: "new@example.com", role: "view" },
+    });
+    expect(add).toMatchObject({ status: 403, body: { code: "FORBIDDEN" } });
+  });
+
+  it("does not allow ownership to be assigned or removed through member management", async () => {
+    expect((await app.handle({
+      method: "POST", path: "/v1/aquariums/reef-a/members", authorization: "Bearer alice",
+      body: { email: "new@example.com", role: "owner" },
+    })).status).toBe(400);
+    expect((await app.handle({
+      method: "DELETE", path: "/v1/aquariums/reef-a/members/alice", authorization: "Bearer alice",
+    })).status).toBe(404);
+  });
+
+  it("resends pending invitations and exposes the permanent authorization audit", async () => {
+    expect(await app.handle({
+      method: "POST", path: "/v1/aquariums/reef-a/members/new-user/resend",
+      authorization: "Bearer alice",
+    })).toMatchObject({ status: 200, body: { member: { pending: true } } });
+    expect(await app.handle({
+      method: "GET", path: "/v1/aquariums/reef-a/authorization-audit",
+      authorization: "Bearer alice",
+    })).toEqual({ status: 200, body: { events: [] } });
+    expect((await app.handle({
+      method: "POST", path: "/v1/aquariums/reef-a/members/new-user/resend",
+      authorization: "Bearer charlie",
+    })).status).toBe(403);
+  });
+
+  it("requires an owner to transfer ownership to an accepted manager", async () => {
+    expect(await app.handle({
+      method: "POST", path: "/v1/aquariums/reef-a/members/new-user/transfer-ownership",
+      authorization: "Bearer alice",
+    })).toEqual({ status: 200, body: { members: [] } });
+    expect((await app.handle({
+      method: "POST", path: "/v1/aquariums/reef-a/members/new-user/transfer-ownership",
+      authorization: "Bearer charlie",
+    })).status).toBe(403);
+  });
+
+  it("exports portable aquarium data without exposing another tenant", async () => {
+    expect(await app.handle({
+      method: "GET", path: "/v1/aquariums/reef-a/export", authorization: "Bearer alice",
+    })).toMatchObject({
+      status: 200,
+      body: { export: { schemaVersion: "1", aquarium: { id: "reef-a" }, controllers: [{ id: "edge-1" }], devices: [], equipment: [], events: [] } },
+    });
+    expect((await app.handle({
+      method: "GET", path: "/v1/aquariums/reef-b/export", authorization: "Bearer alice",
+    })).status).toBe(404);
+  });
+
+  it("prevents account deletion from orphaning owned aquariums", async () => {
+    expect(await app.handle({
+      method: "DELETE", path: "/v1/account", authorization: "Bearer alice",
+    })).toMatchObject({ status: 409, body: { code: "ACCOUNT_OWNS_AQUARIUMS", ownedAquariumIds: ["reef-a"] } });
+    expect(await app.handle({
+      method: "DELETE", path: "/v1/account", authorization: "Bearer charlie",
+    })).toEqual({ status: 200, body: { deleted: true } });
   });
 
   it("lists physical devices as a first-class aquarium resource", async () => {

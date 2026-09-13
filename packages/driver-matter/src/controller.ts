@@ -1,5 +1,3 @@
-import { join } from "node:path";
-
 import type {
   CommissioningController,
   NodeCommissioningOptions,
@@ -14,13 +12,25 @@ import type {
   DriverHealth,
 } from "@modreef/hal";
 
-import { dataDirectory } from "./equipment-runtime-paths.js";
 import { MatterLifecycleCoordinator } from "./matter-lifecycle.js";
 
 const matterDriverPrefix = "modreef.matter";
 
 let controllerPromise: Promise<CommissioningController> | undefined;
+let matterStoragePath: string | undefined;
 const matterLifecycle = new MatterLifecycleCoordinator();
+
+export function configureMatterRuntime({
+  storagePath,
+}: {
+  storagePath: string;
+}): void {
+  if (!storagePath.trim()) throw new Error("Matter storage path is required");
+  if (controllerPromise && matterStoragePath !== storagePath) {
+    throw new Error("Matter runtime is already initialized with another storage path");
+  }
+  matterStoragePath = storagePath;
+}
 
 interface OnOffClientShape {
   getOnOffAttribute(remote?: boolean): Promise<boolean>;
@@ -104,13 +114,16 @@ export function matterMilliwattHoursToKilowattHours(
 
 function controller(): Promise<CommissioningController> {
   if (!controllerPromise) {
+    if (!matterStoragePath) {
+      throw new Error("Matter runtime must be configured before use");
+    }
     controllerPromise = (async () => {
       await import("@matter/nodejs");
       await import("@matter/nodejs-ble");
       const { Environment } = await import("@matter/main");
       const { CommissioningController } = await import("@project-chip/matter.js");
       const environment = Environment.default;
-      environment.vars.set("storage.path", join(dataDirectory, "matter"));
+      environment.vars.set("storage.path", matterStoragePath);
       environment.vars.set("runtime.signals", false);
       environment.vars.set("ble.enable", true);
 

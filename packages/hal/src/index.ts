@@ -146,6 +146,10 @@ export interface ChannelState {
     value: number;
     unit: string;
   };
+  measurements?: Partial<Record<SensorCapability["kind"], {
+    value: number;
+    unit: string;
+  }>>;
 }
 
 export interface SetRelayCommand {

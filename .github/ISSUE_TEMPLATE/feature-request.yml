@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest a focused improvement to modREEF.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What aquarium-management problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Safety and offline behavior
+      description: Explain what should happen during cloud, network, power, or device failure.

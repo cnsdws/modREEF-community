@@ -1,0 +1,61 @@
+name: Bug report
+description: Report reproducible incorrect behavior that is not a security vulnerability.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: Never include Wi-Fi passwords, device keys, setup codes, QR payloads, account tokens, or unredacted diagnostic archives.
+  - type: input
+    id: version
+    attributes:
+      label: modREEF version
+      description: Release tag, controller release hash, or source commit.
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Reef Controller
+        - iPhone/iPad app
+        - Android app
+        - Web application
+        - Cloud API
+        - Device integration
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Describe the smallest repeatable sequence, using isolated bench equipment when commands can switch a physical load.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware and firmware
+      description: Raspberry Pi model, device model, firmware, mobile OS, and relevant network topology.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I removed affected life-support equipment from automatic control or reproduced this on an isolated bench setup.
+          required: true

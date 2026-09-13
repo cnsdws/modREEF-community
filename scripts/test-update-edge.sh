@@ -7,7 +7,14 @@ PARSED="$(
   printf '{"sha256":"%s","url":"%s"}\n' "${SHA}" "${URL}" \
     | bash scripts/update-edge.sh --parse-manifest
 )"
-[[ "${PARSED}" == "${SHA} ${URL}" ]]
+[[ "${PARSED}" == "${SHA} ${URL} unsigned" ]]
+
+SIGNATURE="$(printf 'a%.0s' {1..86})=="
+SIGNED_PARSED="$(
+  printf '{"sha256":"%s","url":"%s","signature":"%s"}\n' "${SHA}" "${URL}" "${SIGNATURE}" \
+    | bash scripts/update-edge.sh --parse-manifest
+)"
+[[ "${SIGNED_PARSED}" == "${SHA} ${URL} ${SIGNATURE}" ]]
 
 if printf '{"sha256":"bad","url":"http://insecure.invalid/archive"}\n' \
   | bash scripts/update-edge.sh --parse-manifest >/dev/null 2>&1; then
@@ -68,6 +75,11 @@ grep -q 'modreef-update.path' scripts/update-edge.sh
 grep -q 'RELEASE_CHANNEL.*staging' scripts/update-edge.sh
 grep -q '/v1/releases/edge/staging/latest' scripts/update-edge.sh
 grep -q '"releaseChannel":"%s"' scripts/update-edge.sh
+grep -q 'openssl pkeyutl -verify -pubin -rawin' scripts/update-edge.sh
+grep -q 'MODREEF_REQUIRE_SIGNED_RELEASES' scripts/update-edge.sh
+grep -q 'deploy/edge/release-public-key.pem /etc/modreef/release-public-key.pem' scripts/update-edge.sh
+grep -q 'deploy/edge/release-public-key.pem /etc/modreef/release-public-key.pem' scripts/install-edge.sh
+openssl pkey -pubin -in deploy/edge/release-public-key.pem -noout
 
 # Sanitized clones must get unique SSH host keys. Prototype images explicitly
 # retain the factory key; customer images explicitly disable remote access.

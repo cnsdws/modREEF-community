@@ -60,6 +60,8 @@ install -m 0644 deploy/edge/modreef-update.timer /etc/systemd/system/modreef-upd
 install -m 0644 deploy/edge/modreef-update.path /etc/systemd/system/modreef-update.path
 install -m 0644 deploy/edge/modreef-first-boot.service /etc/systemd/system/modreef-first-boot.service
 install -m 0644 deploy/edge/modreef.service /etc/avahi/services/modreef.service
+install -d -m 0755 /etc/modreef
+install -m 0644 deploy/edge/release-public-key.pem /etc/modreef/release-public-key.pem
 install -d -m 0750 -o root -g "${SERVICE_USER}" "${SERVICE_DIR}"
 
 systemctl daemon-reload

@@ -54,7 +54,7 @@ import {
   setControllerReleaseChannel,
   type ControllerReleaseChannel,
 } from "./controller-update.js";
-import { isWaterProbeCalibration } from "./yinmik-water-equipment.js";
+import { isWaterProbeCalibration } from "@modreef/driver-yinmik-water";
 import {
   getPublicEquipmentSnapshot,
   isDoserCalibration,
@@ -65,7 +65,20 @@ import {
 import { isAdvancedOutletProgram } from "@modreef/digital-twin";
 import { createAquariumEvent } from "./timeline-api.js";
 import { loadCloudCredentials } from "./cloud-credential-store.js";
-import { completeFeedMode, getActiveFeedMode, startFeedMode } from "./automation-runtime.js";
+import {
+  cancelCustomRoutine,
+  completeFeedMode,
+  createCustomRoutine,
+  deleteCustomRoutine,
+  finishCustomRoutine,
+  getActiveCustomRoutine,
+  getActiveFeedMode,
+  getCustomRoutines,
+  startCustomRoutine,
+  startFeedMode,
+  updateCustomRoutine,
+} from "./automation-runtime.js";
+import type { RoutineDefinitionInput } from "@modreef/automation";
 
 export interface EdgeCloudConfig {
   cloudUrl: string;
@@ -92,6 +105,9 @@ const transientCommandTypes = new Set([
   "equipment.set-power",
   "equipment.set-speed",
   "equipment.set-wavemaker-configuration",
+  "routine.finish",
+  "routine.run",
+  "routine.stop",
 ]);
 const transientCommandLifetimeMilliseconds = 2 * 60 * 1_000;
 
@@ -161,6 +177,12 @@ export interface EdgeCloudDependencies {
   executeStopFeedMode?(commandId: string): Promise<unknown>;
   executeControllerUpdateCheck?(commandId: string): Promise<unknown>;
   executeControllerReleaseChannel?(commandId: string, channel: ControllerReleaseChannel): Promise<unknown>;
+  executeCreateRoutine?(commandId: string, input: RoutineDefinitionInput): Promise<unknown>;
+  executeUpdateRoutine?(commandId: string, routineId: string, input: RoutineDefinitionInput): Promise<unknown>;
+  executeDeleteRoutine?(commandId: string, routineId: string): Promise<unknown>;
+  executeRunRoutine?(commandId: string, routineId: string): Promise<unknown>;
+  executeStopRoutine?(commandId: string): Promise<unknown>;
+  executeFinishRoutine?(commandId: string): Promise<unknown>;
   uptimeSeconds(): number;
 }
 
@@ -198,6 +220,10 @@ const defaultDependencies: EdgeCloudDependencies = {
         ...(feedCycle.recoveryEndsAt ? { recoveryEndsAt: feedCycle.recoveryEndsAt } : {}),
       } : null,
       controllerUpdate: getControllerUpdateStatus(),
+      routines: {
+        definitions: getCustomRoutines(),
+        active: getActiveCustomRoutine() ?? null,
+      },
     };
   },
   executeControlMode: async (_commandId, equipmentId, mode) =>
@@ -268,6 +294,13 @@ const defaultDependencies: EdgeCloudDependencies = {
   executeStartFeedMode: async (_commandId, durationSeconds, skimmerRestartDelaySeconds, cycleId) =>
     startFeedMode(durationSeconds, skimmerRestartDelaySeconds, cycleId),
   executeStopFeedMode: async () => completeFeedMode("cancelled"),
+  executeCreateRoutine: async (_commandId, input) => createCustomRoutine(input),
+  executeUpdateRoutine: async (_commandId, routineId, input) =>
+    updateCustomRoutine(routineId, input),
+  executeDeleteRoutine: async (_commandId, routineId) => deleteCustomRoutine(routineId),
+  executeRunRoutine: async (_commandId, routineId) => startCustomRoutine(routineId),
+  executeStopRoutine: async () => cancelCustomRoutine(),
+  executeFinishRoutine: async () => finishCustomRoutine(),
   uptimeSeconds: () => Math.floor(process.uptime()),
 };
 
@@ -472,6 +505,83 @@ export class EdgeCloudSync {
           throw new Error("Invalid controller release channel");
         }
         await this.dependencies.executeControllerReleaseChannel(command.commandId, channel);
+        result = { commandId: command.commandId, status: "completed" };
+        state.commandResults.push(result);
+        this.dependencies.saveState(stateKey, state);
+        return;
+      }
+
+      if (command.type === "routine.create" || command.type === "routine.update") {
+        const input = command.payload.input;
+        if (
+          typeof input !== "object" || input === null ||
+          typeof (input as Record<string, unknown>).name !== "string" ||
+          !Array.isArray((input as Record<string, unknown>).tasks)
+        ) {
+          throw new Error("Invalid routine definition");
+        }
+        if (command.type === "routine.create") {
+          if (!this.dependencies.executeCreateRoutine) {
+            throw new Error("Routine creation is unavailable");
+          }
+          await this.dependencies.executeCreateRoutine(
+            command.commandId,
+            input as RoutineDefinitionInput,
+          );
+        } else {
+          const routineId = command.payload.routineId;
+          if (typeof routineId !== "string" || routineId.length < 1) {
+            throw new Error("Invalid routine id");
+          }
+          if (!this.dependencies.executeUpdateRoutine) {
+            throw new Error("Routine updates are unavailable");
+          }
+          await this.dependencies.executeUpdateRoutine(
+            command.commandId,
+            routineId,
+            input as RoutineDefinitionInput,
+          );
+        }
+        result = { commandId: command.commandId, status: "completed" };
+        state.commandResults.push(result);
+        this.dependencies.saveState(stateKey, state);
+        return;
+      }
+
+      if (command.type === "routine.delete" || command.type === "routine.run") {
+        const routineId = command.payload.routineId;
+        if (typeof routineId !== "string" || routineId.length < 1) {
+          throw new Error("Invalid routine id");
+        }
+        if (command.type === "routine.delete") {
+          if (!this.dependencies.executeDeleteRoutine) {
+            throw new Error("Routine deletion is unavailable");
+          }
+          await this.dependencies.executeDeleteRoutine(command.commandId, routineId);
+        } else {
+          if (!this.dependencies.executeRunRoutine) {
+            throw new Error("Routine execution is unavailable");
+          }
+          await this.dependencies.executeRunRoutine(command.commandId, routineId);
+        }
+        result = { commandId: command.commandId, status: "completed" };
+        state.commandResults.push(result);
+        this.dependencies.saveState(stateKey, state);
+        return;
+      }
+
+      if (command.type === "routine.stop" || command.type === "routine.finish") {
+        if (command.type === "routine.stop") {
+          if (!this.dependencies.executeStopRoutine) {
+            throw new Error("Routine cancellation is unavailable");
+          }
+          await this.dependencies.executeStopRoutine(command.commandId);
+        } else {
+          if (!this.dependencies.executeFinishRoutine) {
+            throw new Error("Routine completion is unavailable");
+          }
+          await this.dependencies.executeFinishRoutine(command.commandId);
+        }
         result = { commandId: command.commandId, status: "completed" };
         state.commandResults.push(result);
         this.dependencies.saveState(stateKey, state);

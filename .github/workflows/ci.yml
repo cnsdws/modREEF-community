@@ -8,6 +8,7 @@ on:
       - develop
       - production
       - "feature/**"
+      - "codex/**"
 
 concurrency:
   group: ci-${{ github.ref }}

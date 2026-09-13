@@ -32,20 +32,41 @@ import {
   type WaterProbeCalibration,
 } from "@modreef/digital-twin";
 import { OnboardingRegistry } from "./onboarding-registry.js";
+import { builtInDeviceIntegrations } from "@modreef/device-integrations";
 import {
-  GHomeWp12Driver,
   PythonGHomeWp12Transport,
 } from "@modreef/driver-ghome-wp12";
 import {
   JebaoMd44Driver,
-  TcpJebaoMd44Transport,
   translateMd44IntervalProgram,
 } from "@modreef/driver-jebao-md44";
 import {
   discoverMdpPumps,
-  JebaoMdpDriver,
-  TcpMdpTransport,
 } from "@modreef/driver-jebao-mdp";
+import {
+  JebaoDmpDriver,
+  verifyDmpBleIdentity,
+} from "@modreef/driver-jebao-dmp";
+import {
+  YinmikWaterDriver,
+  addYinmikWaterDevice,
+  appendRawWaterSamples,
+  appendWaterMeasurementHistory,
+  applyWaterProbeCalibration,
+  filteredWaterMeasurements,
+  waterMeasurementStability,
+  yinmikWaterDriverPrefix,
+  yinmikWaterProductId,
+  type YinmikWaterCredentials,
+  type YinmikWaterTransport,
+} from "@modreef/driver-yinmik-water";
+import {
+  addMatterDevice,
+  commissionMatterDevice,
+  configureMatterRuntime,
+  removeMatterDevice,
+  type MatterCommissioningStage,
+} from "@modreef/driver-matter";
 import { EquipmentController } from "@modreef/equipment";
 import type { DeviceDriver } from "@modreef/hal";
 import { SqliteTwinStore } from "@modreef/storage-sqlite";
@@ -74,27 +95,8 @@ import {
 } from "./equipment-runtime-paths.js";
 import { GHomeDiscovery } from "./ghome-discovery.js";
 import { ghomeCredentialDeviceIdForRuntime } from "./ghome-runtime-identity.js";
-import { DmpBleController, verifyDmpBleIdentity } from "./dmp-ble.js";
-import {
-  commissionMatterDevice,
-  MatterOutletDriver,
-  removeMatterDevice,
-  type MatterCommissioningStage,
-} from "./matter-controller.js";
-import { addMatterDevice } from "./matter-equipment.js";
 import { withTimeout } from "./async-timeout.js";
 import { setDeviceConnectivity } from "./equipment-connectivity.js";
-import {
-  addYinmikWaterDevice,
-  appendRawWaterSamples,
-  appendWaterMeasurementHistory,
-  applyWaterProbeCalibration,
-  filteredWaterMeasurements,
-  yinmikWaterDriverPrefix,
-  yinmikWaterMeasurements,
-  waterMeasurementStability,
-} from "./yinmik-water-equipment.js";
-
 const legacyDeviceId = "ghome-wp12";
 const legacyDriverId = "modreef.ghome.wp12";
 
@@ -103,6 +105,7 @@ export { dataDirectory } from "./equipment-runtime-paths.js";
 export const runtimeStore = new SqliteTwinStore(
   join(dataDirectory, "modreef.db"),
 );
+configureMatterRuntime({ storagePath: join(dataDirectory, "matter") });
 
 const credentialStore = new EdgeCredentialStore(
   deviceCredentialPath,
@@ -169,8 +172,8 @@ retentionTimer.unref();
 
 let twin = runtimeStore.load("reef") ?? createInitialTwin();
 const drivers = new Map<string, DeviceDriver>();
-const yinmikTransports = new Map<string, PythonGHomeWp12Transport>();
-const yinmikCredentials = new Map<string, GHomeWp12Credentials>();
+const dmpDrivers = new Map<string, JebaoDmpDriver>();
+const yinmikDrivers = new Map<string, YinmikWaterDriver>();
 const yinmikLastSampleAt = new Map<string, number>();
 const credentialDeviceIds = new Map<string, string>();
 const connectedDeviceIds = new Set<string>();
@@ -191,16 +194,21 @@ function driverIdFor(deviceId: string): string {
 function installDriver(
   runtimeDeviceId: string,
   credentials?: GHomeWp12Credentials,
-): GHomeWp12Driver {
-  const driver = new GHomeWp12Driver(
-    runtimeDeviceId,
-    new PythonGHomeWp12Transport(
-      "scripts/tuya-bridge.py",
-      repositoryRoot,
-      process.env.MODREEF_PYTHON ?? "python3",
-      credentials,
-    ),
-    driverIdFor(runtimeDeviceId),
+): DeviceDriver {
+  const driver = builtInDeviceIntegrations.createDriver(
+    "modreef.ghome-wp12",
+    {
+      deviceId: runtimeDeviceId,
+      driverId: driverIdFor(runtimeDeviceId),
+    },
+    {
+      transport: new PythonGHomeWp12Transport(
+        "scripts/tuya-bridge.py",
+        repositoryRoot,
+        process.env.MODREEF_PYTHON ?? "python3",
+        credentials,
+      ),
+    },
   );
   drivers.set(runtimeDeviceId, driver);
   if (credentials) {
@@ -234,20 +242,19 @@ if (storedCredentials.length > 0) {
 for (const credentials of allStoredTuyaCredentials.filter(
   ({ deviceKind }) => deviceKind === "yinmik-water",
 )) {
-  twin = addYinmikWaterDevice(twin, credentials.deviceId);
+  const displayName = twin.devices?.find(({ id }) => id === credentials.deviceId)?.name ??
+    "Water Meter";
+  twin = addYinmikWaterDevice(twin, credentials.deviceId, displayName);
   credentialDeviceIds.set(credentials.deviceId, credentials.deviceId);
-  yinmikCredentials.set(credentials.deviceId, credentials);
-  yinmikTransports.set(credentials.deviceId, new PythonGHomeWp12Transport(
-    "scripts/tuya-bridge.py",
-    repositoryRoot,
-    process.env.MODREEF_PYTHON ?? "python3",
-    { ...credentials, protocolVersion: credentials.protocolVersion ?? "3.4" },
-  ));
+  installYinmikDriver(credentials, displayName);
 }
 
 for (const device of twin.devices ?? []) {
   if (device.driverId.startsWith("modreef.matter:")) {
-    drivers.set(device.id, new MatterOutletDriver(device.id));
+    drivers.set(device.id, builtInDeviceIntegrations.createDriver(
+      "modreef.matter",
+      { deviceId: device.id },
+    ));
   }
 }
 
@@ -257,7 +264,10 @@ for (const registration of mdpRegistrations) {
 }
 for (const registration of md44Registrations) ensureMd44Twin(registration);
 for (const registration of md44Registrations) installMd44Driver(registration);
-for (const registration of dmpRegistrations) ensureDmpTwin(registration);
+for (const registration of dmpRegistrations) {
+  installDmpDriver(registration);
+  ensureDmpTwin(registration);
+}
 
 runtimeStore.save(twin);
 
@@ -449,68 +459,13 @@ async function refreshEquipmentChannelStates(): Promise<
 }
 
 async function refreshYinmikWaterMeasurements(): Promise<void> {
-  await Promise.all([...yinmikTransports].map(async ([deviceId, transport]) => {
-    const driverId = `${yinmikWaterDriverPrefix}:${deviceId}`;
+  await Promise.all([...yinmikDrivers].map(async ([deviceId, driver]) => {
+    const driverId = driver.id;
     const now = Date.now();
     if (now - (yinmikLastSampleAt.get(deviceId) ?? 0) < 5_000) return;
     try {
-      let dps: Record<string, unknown> | undefined;
-      try {
-        dps = await withTimeout(
-          transport.readStatus(),
-          deviceOperationTimeoutMilliseconds,
-          `Water quality refresh for ${deviceId}`,
-        );
-      } catch (initialError) {
-        const credentials = yinmikCredentials.get(deviceId);
-        if (!credentials) throw initialError;
-
-        let recovered = false;
-        let networkAddress = credentials.networkAddress;
-        try {
-          networkAddress = await yinmikDiscovery.findPrivateAddress(deviceId);
-        } catch {
-          // Retain the last known private address when the UDP broadcast is
-          // temporarily unavailable; protocol recovery can still succeed.
-        }
-        const protocolVersions = credentials.protocolVersion
-          ? [credentials.protocolVersion, "3.4", "3.5", "3.3"] as const
-          : ["3.4", "3.5", "3.3"] as const;
-        for (const protocolVersion of [...new Set(protocolVersions)]) {
-          const candidate = new PythonGHomeWp12Transport(
-            "scripts/tuya-bridge.py",
-            repositoryRoot,
-            process.env.MODREEF_PYTHON ?? "python3",
-            { ...credentials, networkAddress, protocolVersion },
-          );
-          try {
-            dps = await withTimeout(
-              candidate.readStatus(),
-              deviceOperationTimeoutMilliseconds,
-              `Water quality ${protocolVersion} probe for ${deviceId}`,
-            );
-            const updatedCredentials = {
-              ...credentials,
-              networkAddress,
-              protocolVersion,
-            };
-            credentialStore.saveGHomeWp12(updatedCredentials);
-            yinmikCredentials.set(deviceId, updatedCredentials);
-            yinmikTransports.set(deviceId, candidate);
-            console.info(`Water quality device ${deviceId} uses Tuya ${protocolVersion}`);
-            recovered = true;
-            break;
-          } catch {
-            // Continue through the bounded protocol compatibility list.
-          }
-        }
-        if (!recovered) throw initialError;
-      }
-      if (!dps) throw new Error(`Water quality device ${deviceId} returned no telemetry`);
-      const instantaneousRawMeasurements = yinmikWaterMeasurements(
+      const instantaneousRawMeasurements = await driver.readMeasurements(
         twin.aquarium.id,
-        deviceId,
-        dps,
         new Date(now).toISOString(),
       );
       yinmikLastSampleAt.set(deviceId, now);
@@ -666,10 +621,10 @@ export async function setEquipmentPower(
   );
 
   if (previous?.binding && dmpRegistration) {
-    const dmpController = new DmpBleController(dmpRegistration.bluetoothAddress);
+    const dmpDriver = dmpDriverFor(dmpRegistration);
     try {
-      await dmpController.connect();
-      await dmpController.setPower(on);
+      await dmpDriver.connect(dmpRegistration.deviceId);
+      await dmpDriver.setPower(on);
       twin = setDeviceConnectivity(
         twin, previous.binding.driverId, dmpRegistration.deviceId, true,
       );
@@ -682,7 +637,7 @@ export async function setEquipmentPower(
       runtimeStore.save(twin);
       throw error;
     } finally {
-      await dmpController.disconnect();
+      await dmpDriver.disconnect(dmpRegistration.deviceId);
     }
     const updated = twin.equipment.find((equipment) => equipment.id === equipmentId)!;
     if (context.record !== false && previous.enabled !== updated.enabled) {
@@ -747,12 +702,12 @@ export async function setEquipmentSpeed(
     ({ deviceId }) => deviceId === equipment?.binding?.deviceId,
   );
   if (equipment && dmpRegistration) {
-    const controller = new DmpBleController(dmpRegistration.bluetoothAddress);
+    const dmpDriver = dmpDriverFor(dmpRegistration);
     const activeMode = equipment.wavemakerMode ?? "M3";
     const modeSetting = equipment.wavemakerModeSettings?.[activeMode];
     try {
-      await controller.connect();
-      await controller.setMode(
+      await dmpDriver.connect(dmpRegistration.deviceId);
+      await dmpDriver.setMode(
         activeMode,
         percent,
         activeMode === "M4" ? 100 : modeSetting?.pulseFrequency ?? 100,
@@ -767,7 +722,7 @@ export async function setEquipmentSpeed(
       runtimeStore.save(twin);
       throw error;
     } finally {
-      await controller.disconnect();
+      await dmpDriver.disconnect(dmpRegistration.deviceId);
     }
     twin = setTwinEquipmentSpeed(twin, equipmentId, percent);
     runtimeStore.save(twin);
@@ -970,11 +925,11 @@ export async function updateWavemakerConfiguration(
   if (!equipment || !registration) {
     throw new Error("DMP-40 registration was not found");
   }
-  const controller = new DmpBleController(registration.bluetoothAddress);
+  const dmpDriver = dmpDriverFor(registration);
   try {
-    await controller.connect();
+    await dmpDriver.connect(registration.deviceId);
     const setting = modeSettings?.[mode] ?? equipment.wavemakerModeSettings?.[mode];
-    await controller.setMode(
+    await dmpDriver.setMode(
       mode,
       setting?.flowPercent ?? equipment.speedPercent ?? 100,
       mode === "M4" ? 100 : setting?.pulseFrequency ?? 100,
@@ -989,7 +944,7 @@ export async function updateWavemakerConfiguration(
     runtimeStore.save(twin);
     throw error;
   } finally {
-    await controller.disconnect();
+    await dmpDriver.disconnect(registration.deviceId);
   }
   twin = updateTwinWavemakerConfiguration(
     twin, equipmentId, feedCycleParticipation, linkRole, mode, modeSettings,
@@ -1272,13 +1227,7 @@ export function registerYinmikWaterDevice(
   displayName?: string,
 ): AquariumDigitalTwin {
   credentialDeviceIds.set(credentials.deviceId, credentials.deviceId);
-  yinmikCredentials.set(credentials.deviceId, credentials);
-  yinmikTransports.set(credentials.deviceId, new PythonGHomeWp12Transport(
-    "scripts/tuya-bridge.py",
-    repositoryRoot,
-    process.env.MODREEF_PYTHON ?? "python3",
-    { ...credentials, protocolVersion: credentials.protocolVersion ?? "3.4" },
-  ));
+  installYinmikDriver(credentials, displayName);
   twin = addYinmikWaterDevice(
     twin,
     credentials.deviceId,
@@ -1327,6 +1276,7 @@ export function registerDmpWavemaker(
     registration,
   ];
   runtimeStore.saveState(dmpRegistrationsKey, dmpRegistrations);
+  installDmpDriver(registration);
   ensureDmpTwin(registration);
   twin = setDeviceConnectivity(
     twin,
@@ -1351,7 +1301,10 @@ export async function registerMatterDevice(
     compatibilityHint,
     onProgress,
   );
-  drivers.set(registration.deviceId, new MatterOutletDriver(registration.deviceId));
+  drivers.set(registration.deviceId, builtInDeviceIntegrations.createDriver(
+    "modreef.matter",
+    { deviceId: registration.deviceId },
+  ));
   controller = new EquipmentController([...drivers.values()]);
   twin = addMatterDevice(twin, registration, displayName);
   runtimeStore.save(twin);
@@ -1388,8 +1341,7 @@ export async function deletePhysicalDevice(
         : undefined);
   if (credentialDeviceId) credentialStore.deleteGHomeWp12(credentialDeviceId);
 
-  yinmikCredentials.delete(physicalDeviceId);
-  yinmikTransports.delete(physicalDeviceId);
+  yinmikDrivers.delete(physicalDeviceId);
   yinmikLastSampleAt.delete(physicalDeviceId);
   runtimeStore.deleteState(`yinmik-water-initial-dps:${physicalDeviceId}`);
   new OnboardingRegistry(runtimeStore).remove(physicalDeviceId);
@@ -1426,6 +1378,7 @@ export async function deletePhysicalDevice(
       ({ deviceId }) => deviceId !== physicalDeviceId,
     );
     runtimeStore.saveState(dmpRegistrationsKey, dmpRegistrations);
+    dmpDrivers.delete(physicalDeviceId);
   }
   credentialDeviceIds.delete(physicalDeviceId);
   connectedDeviceIds.delete(physicalDeviceId);
@@ -1435,10 +1388,76 @@ export async function deletePhysicalDevice(
   return getTwin();
 }
 
+function createYinmikTransport(
+  credentials: YinmikWaterCredentials,
+): YinmikWaterTransport {
+  const transport = new PythonGHomeWp12Transport(
+    "scripts/tuya-bridge.py",
+    repositoryRoot,
+    process.env.MODREEF_PYTHON ?? "python3",
+    credentials,
+  );
+  return {
+    readStatus: () => withTimeout(
+      transport.readStatus(),
+      deviceOperationTimeoutMilliseconds,
+      `Water quality ${credentials.protocolVersion ?? "default"} probe for ${credentials.deviceId}`,
+    ),
+  };
+}
+
+function installYinmikDriver(
+  credentials: GHomeWp12Credentials,
+  displayName = "Water Meter",
+): YinmikWaterDriver {
+  const registrationCredentials: YinmikWaterCredentials = {
+    deviceId: credentials.deviceId,
+    networkAddress: credentials.networkAddress,
+    localKey: credentials.localKey,
+    productId: credentials.productId ?? yinmikWaterProductId,
+    protocolVersion: credentials.protocolVersion ?? "3.4",
+  };
+  const driver = builtInDeviceIntegrations.createDriver(
+    "modreef.yinmik-water",
+    {
+      deviceId: credentials.deviceId,
+      displayName,
+      credentials: registrationCredentials,
+      driverId: `${yinmikWaterDriverPrefix}:${credentials.deviceId}`,
+    },
+    {
+      createTransport: (candidate: unknown) =>
+        createYinmikTransport(candidate as YinmikWaterCredentials),
+      resolveNetworkAddress: (deviceId: unknown) =>
+        yinmikDiscovery.findPrivateAddress(String(deviceId)),
+      persistCredentials: (candidate: unknown) => {
+        const recovered = candidate as YinmikWaterCredentials;
+        credentialStore.saveGHomeWp12({
+          ...recovered,
+          deviceKind: "yinmik-water",
+        });
+        credentialDeviceIds.set(credentials.deviceId, recovered.deviceId);
+        console.info(
+          `Water quality device ${recovered.deviceId} uses Tuya ${recovered.protocolVersion ?? "default"}`,
+        );
+      },
+    },
+  );
+  if (!(driver instanceof YinmikWaterDriver)) {
+    throw new Error("YINMIK integration returned an incompatible driver");
+  }
+  yinmikDrivers.set(credentials.deviceId, driver);
+  return driver;
+}
+
 function installMdpDriver(registration: MdpPumpRegistration): void {
-  drivers.set(registration.deviceId, new JebaoMdpDriver(
-    registration.deviceId,
-    new TcpMdpTransport(registration.networkAddress, {
+  drivers.set(registration.deviceId, builtInDeviceIntegrations.createDriver(
+    "modreef.jebao-mdp",
+    {
+      ...registration,
+      driverId: `modreef.jebao-mdp:${registration.deviceId}`,
+    },
+    {
       resolveHost: async () => {
         const discovered = (await discoverMdpPumps(3_000))
           .find(({ deviceId }) => deviceId === registration.deviceId);
@@ -1448,20 +1467,37 @@ function installMdpDriver(registration: MdpPumpRegistration): void {
         }
         return registration.networkAddress;
       },
-    }),
-    `modreef.jebao-mdp:${registration.deviceId}`,
-    registration.model,
-    registration.displayName,
+    },
   ));
 }
 
 function installMd44Driver(registration: Md44DoserRegistration): void {
-  drivers.set(registration.deviceId, new JebaoMd44Driver(
-    registration.deviceId,
-    new TcpJebaoMd44Transport(registration.networkAddress),
-    `modreef.jebao-md44:${registration.deviceId}`,
-    registration.displayName,
+  drivers.set(registration.deviceId, builtInDeviceIntegrations.createDriver(
+    "modreef.jebao-md44",
+    {
+      ...registration,
+      driverId: `modreef.jebao-md44:${registration.deviceId}`,
+    },
   ));
+}
+
+function installDmpDriver(registration: DmpWavemakerRegistration): JebaoDmpDriver {
+  const driver = builtInDeviceIntegrations.createDriver(
+    "modreef.jebao-dmp",
+    {
+      ...registration,
+      driverId: `modreef.jebao-dmp-ble:${registration.deviceId}`,
+    },
+  );
+  if (!(driver instanceof JebaoDmpDriver)) {
+    throw new Error("Jebao DMP integration returned an incompatible driver");
+  }
+  dmpDrivers.set(registration.deviceId, driver);
+  return driver;
+}
+
+function dmpDriverFor(registration: DmpWavemakerRegistration): JebaoDmpDriver {
+  return dmpDrivers.get(registration.deviceId) ?? installDmpDriver(registration);
 }
 
 function ensureMdpTwin(registration: MdpPumpRegistration): void {

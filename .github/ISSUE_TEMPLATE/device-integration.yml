@@ -1,0 +1,54 @@
+name: Device integration proposal
+description: Propose support for a new aquarium device using lawful interoperability evidence.
+title: "[Device]: "
+labels:
+  - device-integration
+body:
+  - type: input
+    id: manufacturer-model
+    attributes:
+      label: Manufacturer and exact model
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Hardware and firmware versions
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      multiple: true
+      options:
+        - Bluetooth LE
+        - Wi-Fi/LAN
+        - Matter
+        - USB/serial
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Interoperability evidence and provenance
+      description: Explain how protocol behavior was obtained. Do not attach vendor code, proprietary SDKs, copyrighted manuals, credentials, or unredacted captures.
+    validations:
+      required: true
+  - type: textarea
+    id: capabilities
+    attributes:
+      label: Desired capabilities
+      description: Discovery, onboarding, commands, telemetry, schedules, alarms, deletion, and recovery behavior.
+    validations:
+      required: true
+  - type: checkboxes
+    id: contributor-rights
+    attributes:
+      label: Contribution rights
+      options:
+        - label: I have the right to submit the proposed evidence and implementation under Apache-2.0.
+          required: true
+        - label: I will test physical commands on isolated bench equipment.
+          required: true

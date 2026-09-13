@@ -2,7 +2,8 @@ import noble, {
   type Characteristic,
   type Peripheral,
 } from "@stoprocent/noble";
-import type { WavemakerMode } from "@modreef/digital-twin";
+
+export type DmpMode = "M1" | "M2" | "M3" | "M4" | "M5";
 
 const dmpServiceUuid = "abf0";
 const dmpCharacteristicUuid = "abf7";
@@ -84,9 +85,6 @@ export async function discoverDmpBleIdentity(
       finish(new Error(`The Edge controller could not find ${advertisedName} over Bluetooth`));
     }, timeoutMilliseconds);
     noble.on("discover", onDiscover);
-    // XPG pairing advertisements expose the device name and public address,
-    // but do not consistently include ABF0 until after connection. Scan all
-    // BLE advertisements and retain the strict exact-name check above.
     void noble.startScanningAsync([], true).catch((cause: unknown) => {
       finish(cause instanceof Error ? cause : new Error(String(cause)));
     });
@@ -124,7 +122,7 @@ export const dmpBleGatt = {
   characteristicUuid: dmpCharacteristicUuid,
 } as const;
 
-const modeByte: Record<WavemakerMode, number> = {
+const modeByte: Record<DmpMode, number> = {
   M1: 0x20,
   M2: 0x28,
   M3: 0x38,
@@ -153,7 +151,7 @@ export function buildDmpChallengeResponse(challenge: Buffer): Buffer {
 
 export function buildDmpModeFrame(
   transaction: number,
-  mode: WavemakerMode,
+  mode: DmpMode,
   speedPercent: number,
   pulseFrequency = 100,
 ): Buffer {
@@ -219,7 +217,7 @@ export class DmpBleController {
     }
   }
 
-  async setMode(mode: WavemakerMode, speedPercent: number, pulseFrequency = 100): Promise<void> {
+  async setMode(mode: DmpMode, speedPercent: number, pulseFrequency = 100): Promise<void> {
     const transaction = this.nextTransaction();
     const requested = buildDmpModeFrame(transaction, mode, speedPercent, pulseFrequency);
     await this.write(requested);
@@ -275,11 +273,6 @@ export class DmpBleController {
 
   private async write(frame: Buffer): Promise<void> {
     if (!this.characteristic) throw new Error("DMP-40 is not connected");
-    // ABF7 is a write-without-response characteristic. The DMP accepts the
-    // frame immediately, but some BlueZ/Noble combinations never invoke the
-    // write callback, leaving an otherwise successful command pending forever.
-    // Bound the transport callback; protocol confirmation is handled by the
-    // notification wait that follows each write.
     await Promise.race([
       this.characteristic.writeAsync(frame, true),
       new Promise<void>((resolve) => setTimeout(resolve, 500)),

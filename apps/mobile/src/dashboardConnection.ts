@@ -1,7 +1,13 @@
 import * as SecureStore from "expo-secure-store";
 import type {
+  AuthorizationAuditEvent,
+  AquariumExport,
   AquariumSummary,
+  AquariumMember,
+  AquariumRole,
   EdgeSummary,
+  RoutineDefinitionInput,
+  RoutineRuntimeState,
   ReefCoachReport,
   WaterAlarmRules,
   RegisteredEdgeCredentials,
@@ -64,6 +70,13 @@ import {
   getEdgeHealth,
   startEdgeFeedMode,
   stopEdgeFeedMode,
+  createEdgeRoutine,
+  deleteEdgeRoutine,
+  finishEdgeRoutine,
+  getEdgeRoutines,
+  runEdgeRoutine,
+  stopEdgeRoutine,
+  updateEdgeRoutine,
   type CreateAquariumEventInput,
   type EdgeFeedMode,
 } from "./edgeClient";
@@ -232,6 +245,62 @@ export async function createCloudAquarium(name: string): Promise<Aquarium> {
 export async function listDashboardAquariums(): Promise<AquariumSummary[]> {
   if (dashboardConnectionMode() !== "cloud") return [];
   return cloudClient().listAquariums();
+}
+
+export async function listDashboardAquariumMembers(aquariumId: string): Promise<AquariumMember[]> {
+  if (dashboardConnectionMode() !== "cloud") return [];
+  return cloudClient().listAquariumMembers(aquariumId);
+}
+
+export async function addDashboardAquariumMember(
+  aquariumId: string,
+  email: string,
+  role: Exclude<AquariumRole, "owner">,
+): Promise<AquariumMember> {
+  return cloudClient().addAquariumMember(aquariumId, email, role);
+}
+
+export async function updateDashboardAquariumMember(
+  aquariumId: string,
+  userId: string,
+  update: { role?: Exclude<AquariumRole, "owner">; receiveAlarms?: boolean },
+): Promise<AquariumMember> {
+  return cloudClient().updateAquariumMember(aquariumId, userId, update);
+}
+
+export async function removeDashboardAquariumMember(
+  aquariumId: string,
+  userId: string,
+): Promise<void> {
+  await cloudClient().removeAquariumMember(aquariumId, userId);
+}
+
+export async function resendDashboardAquariumInvitation(
+  aquariumId: string,
+  userId: string,
+): Promise<AquariumMember> {
+  return cloudClient().resendAquariumInvitation(aquariumId, userId);
+}
+
+export async function transferDashboardAquariumOwnership(
+  aquariumId: string,
+  userId: string,
+): Promise<AquariumMember[]> {
+  return cloudClient().transferAquariumOwnership(aquariumId, userId);
+}
+
+export async function listDashboardAuthorizationAudit(
+  aquariumId: string,
+): Promise<AuthorizationAuditEvent[]> {
+  return cloudClient().listAuthorizationAudit(aquariumId);
+}
+
+export async function exportDashboardAquarium(aquariumId: string): Promise<AquariumExport> {
+  return cloudClient().exportAquarium(aquariumId);
+}
+
+export async function deleteDashboardAccount(): Promise<void> {
+  await cloudClient().deleteAccount();
 }
 
 /** Device identities already assigned to any aquarium visible to this user. */
@@ -547,6 +616,155 @@ async function commandEdge(client: ModReefCloudClient, aquariumId: string) {
   const edge = edges.find((candidate) => candidate.status === "online") ?? edges[0];
   if (!edge) throw new Error("No Reef Controller is registered for this aquarium");
   return edge;
+}
+
+export async function getDashboardRoutines(
+  edgeId?: string,
+): Promise<RoutineRuntimeState> {
+  if (dashboardConnectionMode() === "local") {
+    const state = await getEdgeRoutines();
+    return { definitions: state.routines, active: state.active };
+  }
+  const client = cloudClient();
+  const aquariumId = await selectedAquariumId(client);
+  const edges = await client.listEdges(aquariumId);
+  const edge = edgeId
+    ? edges.find((candidate) => candidate.id === edgeId)
+    : edges.find((candidate) => candidate.status === "online") ?? edges[0];
+  if (!edge) throw new Error("No Reef Controller is registered for this aquarium");
+  return edge.runtimeState.routines ?? { definitions: [], active: null };
+}
+
+async function sendDashboardRoutineCommand(
+  edgeId: string,
+  type: string,
+  payload: Record<string, unknown>,
+  confirmedState?: (state: RoutineRuntimeState) => boolean,
+): Promise<void> {
+  const client = cloudClient();
+  const aquariumId = await selectedAquariumId(client);
+  await requireOnlineOwningEdge(client, aquariumId, edgeId);
+  const command = await client.createCommand(aquariumId, {
+    commandId: commandId(),
+    edgeId,
+    equipmentId: "routines",
+    type,
+    payload,
+  });
+  const deadline = Date.now() + cloudCommandConfirmationTimeoutMilliseconds;
+  while (Date.now() < deadline) {
+    const outcome = await client.getCommand(aquariumId, command.commandId);
+    if (outcome.status === "completed") {
+      if (!confirmedState) {
+        // Command results and the next runtime-state heartbeat are separate
+        // sync cycles. Give the controller time to publish its new state.
+        await delay(500);
+        return;
+      }
+      const edge = (await client.listEdges(aquariumId))
+        .find((candidate) => candidate.id === edgeId);
+      const state = edge?.runtimeState.routines;
+      if (state && confirmedState(state)) return;
+    }
+    if (outcome.status === "failed") {
+      throw new Error(outcome.message ?? "The Reef Controller rejected the routine command.");
+    }
+    await delay(cloudCommandConfirmationPollMilliseconds);
+  }
+  throw new Error("The Reef Controller did not confirm the routine command within 30 seconds.");
+}
+
+export async function createDashboardRoutine(
+  edgeId: string,
+  input: RoutineDefinitionInput,
+): Promise<void> {
+  if (dashboardConnectionMode() === "local") {
+    await createEdgeRoutine(input);
+    return;
+  }
+  await sendDashboardRoutineCommand(
+    edgeId,
+    "routine.create",
+    { input },
+    (state) => state.definitions.some(
+      (routine) => routine.name === input.name.trim() &&
+        Date.parse(routine.updatedAt) >= Date.now() - 30_000,
+    ),
+  );
+}
+
+export async function updateDashboardRoutine(
+  edgeId: string,
+  routineId: string,
+  input: RoutineDefinitionInput,
+): Promise<void> {
+  if (dashboardConnectionMode() === "local") {
+    await updateEdgeRoutine(routineId, input);
+    return;
+  }
+  await sendDashboardRoutineCommand(
+    edgeId,
+    "routine.update",
+    { routineId, input },
+    (state) => state.definitions.some(
+      (routine) => routine.id === routineId &&
+        routine.name === input.name.trim() &&
+        JSON.stringify(routine.tasks) === JSON.stringify(input.tasks),
+    ),
+  );
+}
+
+export async function deleteDashboardRoutine(
+  edgeId: string,
+  routineId: string,
+): Promise<void> {
+  if (dashboardConnectionMode() === "local") {
+    await deleteEdgeRoutine(routineId);
+    return;
+  }
+  await sendDashboardRoutineCommand(
+    edgeId,
+    "routine.delete",
+    { routineId },
+    (state) => !state.definitions.some((routine) => routine.id === routineId),
+  );
+}
+
+export async function runDashboardRoutine(
+  edgeId: string,
+  routineId: string,
+): Promise<void> {
+  if (dashboardConnectionMode() === "local") {
+    await runEdgeRoutine(routineId);
+    return;
+  }
+  await sendDashboardRoutineCommand(edgeId, "routine.run", { routineId });
+}
+
+export async function stopDashboardRoutine(edgeId: string): Promise<void> {
+  if (dashboardConnectionMode() === "local") {
+    await stopEdgeRoutine();
+    return;
+  }
+  await sendDashboardRoutineCommand(
+    edgeId,
+    "routine.stop",
+    {},
+    (state) => state.active === null,
+  );
+}
+
+export async function finishDashboardRoutine(edgeId: string): Promise<void> {
+  if (dashboardConnectionMode() === "local") {
+    await finishEdgeRoutine();
+    return;
+  }
+  await sendDashboardRoutineCommand(
+    edgeId,
+    "routine.finish",
+    {},
+    (state) => state.active?.holding !== true,
+  );
 }
 
 export async function updateDashboardEvent(

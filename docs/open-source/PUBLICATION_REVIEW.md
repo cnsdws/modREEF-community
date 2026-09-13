@@ -32,13 +32,14 @@ and branding for official distributions; Apache-2.0 covers the program code.
       2026-08-26. See ADR 0004.
 - [x] Dennis Stevens confirmed redistribution rights for the six runtime brand
       assets on 2026-08-26.
-- [ ] Tuya SDK binaries, keys, secrets, and account-derived provisioning data
-      are absent.
-- [ ] Packet captures, diagnostics, databases, controller images, QR secrets,
-      and private factory-label data are absent.
-- [ ] Device protocol identifiers documented as public interoperability data do
+- [x] Tuya SDK binaries, keys, secrets, and account-derived provisioning data
+      are absent from the release snapshot audited on 2026-09-13.
+- [x] Packet captures, diagnostics, databases, controller images, QR secrets,
+      and private factory-label data are absent from that snapshot.
+- [x] Device protocol identifiers documented as public interoperability data do
       not grant access to an individual device or account.
-- [ ] Dependency licenses and notices have received a final review.
+- [x] Dependency licenses and notices passed the final automated inventory and
+      maintainer review on 2026-09-13.
 - [ ] A physical smoke test passes on a disposable aquarium test setup.
 - [ ] The final archive hash and source commit are recorded in the release
       decision.

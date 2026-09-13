@@ -47,3 +47,11 @@ Security reports and contributions are governed by [SECURITY.md](SECURITY.md),
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). See the
 [public-source publication review](docs/open-source/PUBLICATION_REVIEW.md) before
 publishing a source snapshot.
+
+## Community resources
+
+- [Install a community Reef Controller](docs/user-manual/install-community-controller.md)
+- [Supported devices and platforms](docs/SUPPORT_MATRIX.md)
+- [Changelog](CHANGELOG.md)
+- [Contributing a device integration](docs/architecture/210-device-integrations.md)
+- [Public release process](docs/open-source/RELEASE_PROCESS.md)

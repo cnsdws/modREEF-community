@@ -24,6 +24,7 @@
     "@modreef/digital-twin": "workspace:*",
     "@modreef/foundation": "workspace:*",
     "@modreef/onboarding": "workspace:*",
+    "@modreef/driver-yinmik-water": "workspace:*",
     "expo": "^56.0.16",
     "expo-auth-session": "~56.0.15",
     "expo-camera": "~56.0.8",

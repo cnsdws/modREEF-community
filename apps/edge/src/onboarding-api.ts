@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { isIP } from "node:net";
 
 import { EdgeCredentialStore } from "./edge-credential-store.js";
+import { builtInDeviceIntegrations } from "@modreef/device-integrations";
 import {
   discoverMdpPumps,
   TcpMdpTransport,
@@ -15,6 +16,15 @@ import {
   discoverJebaoMd44Dosers,
   TcpJebaoMd44Transport,
 } from "@modreef/driver-jebao-md44";
+import {
+  discoverDmpBleCandidates,
+  verifyDmpBleIdentity,
+} from "@modreef/driver-jebao-dmp";
+import {
+  isOperationalHandoffFailure,
+  isRecoverableMatterPairingFailure,
+  type MatterCommissioningStage,
+} from "@modreef/driver-matter";
 import { LocalAuthorizationStore } from "./local-authorization-store.js";
 import { GHomeDiscovery, isPrivateIPv4 } from "./ghome-discovery.js";
 import {
@@ -28,18 +38,9 @@ import {
   runtimeStore,
 } from "./equipment-runtime.js";
 import {
-  discoverDmpBleCandidates,
-  verifyDmpBleIdentity,
-} from "./dmp-ble.js";
-import {
   OnboardingRegistry,
   type EquipmentRegistration,
 } from "./onboarding-registry.js";
-import {
-  isOperationalHandoffFailure,
-  isRecoverableMatterPairingFailure,
-  type MatterCommissioningStage,
-} from "./matter-controller.js";
 import type { EdgeCloudConfig } from "./cloud-sync.js";
 import { deviceCredentialPath, repositoryRoot } from "./equipment-runtime-paths.js";
 import { getMdpAirLinkNetwork } from "./mdp-airlink-network.js";
@@ -820,6 +821,19 @@ export async function handleOnboardingRequest(
         productId: credentials.productId,
         deviceKind: "yinmik-water" as const,
       };
+      try {
+        builtInDeviceIntegrations
+          .get("modreef.yinmik-water")
+          .validateRegistration({
+            deviceId: storedCredentials.deviceId,
+            displayName: credentials.displayName?.trim() || "Water Meter",
+            credentials: storedCredentials,
+          });
+      } catch {
+        response.writeHead(400);
+        response.end(JSON.stringify({ error: "Invalid water-meter credential handoff" }));
+        return true;
+      }
       credentialStore.saveGHomeWp12(storedCredentials);
       if (credentials.initialDps) {
         runtimeStore.saveState(
@@ -1066,33 +1080,37 @@ export async function handleOnboardingRequest(
       : {};
     if (
       typeof item.deviceId !== "string" ||
-      !/^dmp-[0-9a-f]{4,12}$/i.test(item.deviceId) ||
       typeof item.displayName !== "string" ||
-      !item.displayName.trim() ||
       typeof item.advertisedName !== "string" ||
-      !/^(?:XPG-GAgent-[0-9a-f]{4}|W_[0-9a-f]{6})$/i.test(item.advertisedName) ||
-      typeof item.bluetoothAddress !== "string" ||
-      !/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(item.bluetoothAddress)
+      typeof item.bluetoothAddress !== "string"
     ) {
       response.writeHead(400);
       response.end(JSON.stringify({ error: "Invalid DMP wavemaker registration" }));
       return true;
     }
-    const identity = {
+    const registration = {
+      deviceId: item.deviceId.toLowerCase(),
+      displayName: item.displayName.trim(),
       advertisedName: item.advertisedName,
       bluetoothAddress: item.bluetoothAddress.toUpperCase(),
     };
+    try {
+      builtInDeviceIntegrations.get("modreef.jebao-dmp")
+        .validateRegistration(registration);
+    } catch {
+      response.writeHead(400);
+      response.end(JSON.stringify({ error: "Invalid DMP wavemaker registration" }));
+      return true;
+    }
+    const identity = {
+      advertisedName: registration.advertisedName,
+      bluetoothAddress: registration.bluetoothAddress,
+    };
     await verifyDmpBleIdentity(identity);
-    const deviceId = item.deviceId.toLowerCase();
-    const updated = registerDmpWavemaker({
-      deviceId,
-      displayName: item.displayName.trim(),
-      advertisedName: identity.advertisedName,
-      bluetoothAddress: identity.bluetoothAddress,
-    });
+    const updated = registerDmpWavemaker(registration);
     response.writeHead(201);
     response.end(JSON.stringify({
-      device: updated.devices?.find(({ id }) => id === deviceId),
+      device: updated.devices?.find(({ id }) => id === registration.deviceId),
     }));
     return true;
   }

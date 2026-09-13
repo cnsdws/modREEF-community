@@ -15,6 +15,7 @@ export class OidcAuthenticator implements Authenticator {
   readonly #issuer: string;
   readonly #audience: string;
   readonly #jwks: ReturnType<typeof createRemoteJWKSet>;
+  readonly #emailBySubject = new Map<string, string>();
 
   constructor(options: OidcOptions) {
     this.#issuer = normalizeOidcIssuer(options.issuer);
@@ -33,10 +34,23 @@ export class OidcAuthenticator implements Authenticator {
         audience: this.#audience,
       });
       if (!payload.sub) return null;
-      return {
-        subject: payload.sub,
-        ...(typeof payload.email === "string" ? { email: payload.email } : {}),
-      };
+      let email = typeof payload.email === "string" ? payload.email : this.#emailBySubject.get(payload.sub);
+      if (!email) {
+        try {
+          const response = await fetch(`${this.#issuer}userinfo`, {
+            headers: { authorization: `Bearer ${match[1]}` },
+            signal: AbortSignal.timeout(5_000),
+          });
+          if (response.ok) {
+            const profile = await response.json() as { sub?: string; email?: string };
+            if (profile.sub === payload.sub && typeof profile.email === "string") email = profile.email;
+          }
+        } catch {
+          // Profile enrichment must never turn a valid API token into a failed sign-in.
+        }
+      }
+      if (email) this.#emailBySubject.set(payload.sub, email);
+      return { subject: payload.sub, ...(email ? { email } : {}) };
     } catch {
       return null;
     }

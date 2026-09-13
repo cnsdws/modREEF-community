@@ -35,6 +35,22 @@ jobs:
             '
         env:
           EXPECTED_COMMIT: ${{ inputs.commit }}
+      - name: Rebuild and sign the deterministic Edge candidate
+        env:
+          MODREEF_EDGE_RELEASE_SIGNING_KEY: ${{ secrets.MODREEF_EDGE_RELEASE_SIGNING_KEY }}
+        run: |
+          test -n "${MODREEF_EDGE_RELEASE_SIGNING_KEY}"
+          mkdir -p release-candidate
+          bash scripts/build-edge-release.sh release-candidate/modreef-edge-release.tar.gz
+          sha256sum release-candidate/modreef-edge-release.tar.gz | cut -d' ' -f1 > release-candidate/sha256.txt
+          install -m 0600 /dev/null /tmp/modreef-edge-release-key.pem
+          printf '%s\n' "${MODREEF_EDGE_RELEASE_SIGNING_KEY}" > /tmp/modreef-edge-release-key.pem
+          openssl pkeyutl -sign -rawin \
+            -inkey /tmp/modreef-edge-release-key.pem \
+            -in release-candidate/modreef-edge-release.tar.gz \
+            -out release-candidate/signature.bin
+          base64 -w0 release-candidate/signature.bin > release-candidate/signature.txt
+          rm -f /tmp/modreef-edge-release-key.pem release-candidate/signature.bin
       - name: Fast-forward the production branch
         env:
           GH_TOKEN: ${{ github.token }}
@@ -44,3 +60,43 @@ jobs:
             "repos/${GITHUB_REPOSITORY}/git/refs/heads/production" \
             -f sha="$(git rev-parse HEAD)" \
             -F force=false
+      - name: Publish signature after the qualified API is live
+        env:
+          MODREEF_RELEASE_PUBLISH_TOKEN: ${{ secrets.MODREEF_RELEASE_PUBLISH_TOKEN }}
+        run: |
+          for attempt in {1..40}; do
+            curl --show-error --silent \
+              --request PUT \
+              --header "Authorization: Bearer ${MODREEF_RELEASE_PUBLISH_TOKEN}" \
+              --header "Content-Type: application/gzip" \
+              --header "X-modREEF-Release-SHA256: $(cat release-candidate/sha256.txt)" \
+              --header "X-modREEF-Source-Commit: ${{ inputs.commit }}" \
+              --header "X-modREEF-Release-Signature: $(cat release-candidate/signature.txt)" \
+              --data-binary @release-candidate/modreef-edge-release.tar.gz \
+              https://api.modreef.net/v1/releases/edge/staging >/dev/null || true
+            observed_signature="$(curl --show-error --silent \
+              https://api.modreef.net/v1/releases/edge/staging/latest \
+              | node -e '
+                let body = "";
+                process.stdin.on("data", (chunk) => body += chunk);
+                process.stdin.on("end", () => {
+                  try { process.stdout.write(JSON.parse(body).signature ?? ""); }
+                  catch { process.stdout.write(""); }
+                });
+              ')"
+            if [[ "${observed_signature}" == "$(cat release-candidate/signature.txt)" ]]; then
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "The qualified Cloud API did not accept the signed release within 10 minutes." >&2
+          exit 1
+      - name: Promote the signed Edge candidate
+        env:
+          MODREEF_RELEASE_PUBLISH_TOKEN: ${{ secrets.MODREEF_RELEASE_PUBLISH_TOKEN }}
+        run: |
+          curl --fail --show-error --silent \
+            --request POST \
+            --header "Authorization: Bearer ${MODREEF_RELEASE_PUBLISH_TOKEN}" \
+            --header "X-modREEF-Source-Commit: ${{ inputs.commit }}" \
+            https://api.modreef.net/v1/releases/edge/promote

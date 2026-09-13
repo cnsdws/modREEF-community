@@ -1,0 +1,31 @@
+{
+  "name": "@modreef/driver-matter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./integration": "./src/integration.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@matter/main": "^0.17.6",
+    "@matter/nodejs": "^0.17.6",
+    "@matter/nodejs-ble": "^0.17.6",
+    "@modreef/device-integration": "workspace:*",
+    "@modreef/digital-twin": "workspace:*",
+    "@modreef/hal": "workspace:*",
+    "@project-chip/matter.js": "^0.17.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.7"
+  }
+}
