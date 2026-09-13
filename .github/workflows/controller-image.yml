@@ -107,7 +107,7 @@ jobs:
           retention-days: 7
       - name: Attest public image provenance
         if: github.event.repository.private == false
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: artifacts/controller-image/*.img.xz
       - name: Publish public controller image release
