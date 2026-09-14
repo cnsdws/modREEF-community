@@ -29,7 +29,6 @@ import { deriveControllerSetupId } from "./controller-setup-id.js";
 import { controllerSoftwareVersion } from "./software-version.js";
 
 const port = Number(process.env.MODREEF_PORT ?? 3000);
-const startedAt = Date.now();
 let cloudSync = createEdgeCloudSyncFromEnvironment();
 const consumedLocalAuthorizationNonces = new Map<string, number>();
 
@@ -147,7 +146,7 @@ export function createHealthResponse() {
     checks: health.checks,
     hostname: hostname(),
     timestamp: new Date().toISOString(),
-    uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
+    uptimeSeconds: Math.floor(process.uptime()),
     claimed: Boolean(cloudSync || storedCloud),
     setupId: controllerSetupId(),
     ...(process.env.MODREEF_EDGE_ID ?? storedCloud?.edgeId

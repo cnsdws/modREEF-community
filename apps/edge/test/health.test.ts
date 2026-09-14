@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHealthResponse } from "../src/index";
 
 describe("Edge health", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("returns an evaluated health response", () => {
     const result = createHealthResponse();
 
@@ -9,7 +13,7 @@ describe("Edge health", () => {
     expect(["healthy", "degraded", "unhealthy"]).toContain(
       result.status,
     );
-    expect(result.version).toBe("0.2.1");
+    expect(result.version).toBe("0.2.2");
     expect(typeof result.claimed).toBe("boolean");
     expect(result.setupId).toMatch(/^[A-F0-9]{6}$/);
     expect(Number.isNaN(Date.parse(result.timestamp))).toBe(false);
@@ -34,5 +38,11 @@ describe("Edge health", () => {
     );
 
     expect(statusRank[result.status]).toBe(worstCheck);
+  });
+
+  it("reports process uptime from a monotonic clock", () => {
+    vi.spyOn(process, "uptime").mockReturnValue(42.9);
+
+    expect(createHealthResponse().uptimeSeconds).toBe(42);
   });
 });

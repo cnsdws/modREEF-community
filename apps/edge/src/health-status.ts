@@ -41,9 +41,10 @@ function databaseCheck(): EdgeHealthCheck {
   }
 }
 
-function automationCheck(now: number): EdgeHealthCheck {
-  const automation = getAutomationRuntimeHealth();
-
+export function evaluateAutomationHealth(
+  automation: ReturnType<typeof getAutomationRuntimeHealth>,
+  monotonicNow: number,
+): EdgeHealthCheck {
   if (automation.lastError) {
     return {
       name: "automation",
@@ -53,7 +54,7 @@ function automationCheck(now: number): EdgeHealthCheck {
   }
 
   if (automation.lastCompletedAt === undefined) {
-    const startingFor = now - automation.startedAt;
+    const startingFor = monotonicNow - automation.startedAt;
 
     return startingFor <= 10_000
       ? {
@@ -68,7 +69,7 @@ function automationCheck(now: number): EdgeHealthCheck {
         };
   }
 
-  const heartbeatAge = now - automation.lastCompletedAt;
+  const heartbeatAge = monotonicNow - automation.lastCompletedAt;
 
   return heartbeatAge <= 10_000
     ? {
@@ -85,6 +86,13 @@ function automationCheck(now: number): EdgeHealthCheck {
           heartbeatAge / 1000,
         )} seconds old`,
       };
+}
+
+function automationCheck(monotonicNow: number): EdgeHealthCheck {
+  return evaluateAutomationHealth(
+    getAutomationRuntimeHealth(),
+    monotonicNow,
+  );
 }
 
 function clockCheck(now: number): EdgeHealthCheck {
@@ -219,10 +227,11 @@ function equipmentCheck(): EdgeHealthCheck {
 
 export function createEdgeHealthSnapshot(
   now = Date.now(),
+  monotonicNow = performance.now(),
 ): EdgeHealthSnapshot {
   const checks = [
     databaseCheck(),
-    automationCheck(now),
+    automationCheck(monotonicNow),
     clockCheck(now),
     storageCheck(),
     equipmentCheck(),

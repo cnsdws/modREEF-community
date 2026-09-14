@@ -81,6 +81,11 @@ grep -q 'deploy/edge/release-public-key.pem /etc/modreef/release-public-key.pem'
 grep -q 'deploy/edge/release-public-key.pem /etc/modreef/release-public-key.pem' scripts/install-edge.sh
 openssl pkey -pubin -in deploy/edge/release-public-key.pem -noout
 
+# Existing controllers can spend close to a minute restoring Matter state
+# before the event loop can answer health requests. The qualified update must
+# allow that recovery to complete instead of racing into rollback.
+grep -q 'MODREEF_HEALTH_READY_ATTEMPTS:-45' scripts/edge-health-check.sh
+
 # Sanitized clones must get unique SSH host keys. Prototype images explicitly
 # retain the factory key; customer images explicitly disable remote access.
 grep -q '^ssh-keygen -A$' scripts/initialize-edge-first-boot.sh

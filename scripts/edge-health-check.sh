@@ -11,7 +11,8 @@ systemctl is-active --quiet "${SERVICE}" || {
 }
 
 API_READY=false
-for _attempt in {1..15}; do
+API_READY_ATTEMPTS="${MODREEF_HEALTH_READY_ATTEMPTS:-45}"
+for ((_attempt = 1; _attempt <= API_READY_ATTEMPTS; _attempt += 1)); do
   if curl --fail --silent --max-time 2 "http://127.0.0.1:${PORT}/health" >/dev/null; then
     API_READY=true
     break
