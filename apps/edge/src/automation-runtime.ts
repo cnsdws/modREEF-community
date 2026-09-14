@@ -98,7 +98,7 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 let scheduleTimer: ReturnType<typeof setTimeout> | undefined;
 let scheduleRunning = false;
 let customRoutineTimer: ReturnType<typeof setTimeout> | undefined;
-const automationStartedAt = Date.now();
+const automationStartedAt = performance.now();
 let lastScheduleCompletedAt: number | undefined;
 let lastScheduleError: string | undefined;
 
@@ -1256,7 +1256,7 @@ async function runEquipmentSchedules(): Promise<void> {
       error instanceof Error ? error.message : String(error);
     console.error("Unable to apply equipment schedules:", error);
   } finally {
-    lastScheduleCompletedAt = Date.now();
+    lastScheduleCompletedAt = performance.now();
     scheduleRunning = false;
     scheduleTimer = setTimeout(() => {
       void runEquipmentSchedules();

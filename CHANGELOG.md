@@ -4,6 +4,15 @@ All notable community releases are recorded here. The project uses semantic
 versioning for published controller images and source snapshots while it is in
 developer preview.
 
+## 0.2.2 - 2026-09-14
+
+### Fixed
+
+- Use monotonic time for controller uptime and automation-health age so network
+  clock corrections cannot create false health transitions.
+- Allow qualified updates more time to restore existing Matter state before
+  deciding that the local controller API failed to start.
+
 ## 0.2.1 - 2026-09-14
 
 ### Changed
