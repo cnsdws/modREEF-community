@@ -17,7 +17,7 @@
   "dependencies": {
     "@modreef/device-integration": "workspace:*",
     "@modreef/hal": "workspace:*",
-    "@stoprocent/noble": "^2.5.9"
+    "@stoprocent/noble": "^2.8.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
