@@ -98,3 +98,4 @@ fi
 grep -q 'modreef-controller-onboarding.service' deploy/edge/modreef-first-boot.service
 grep -q 'Cannot preserve factory access' scripts/prepare-edge-image.sh
 grep -q "127\\.0\\.1\\.1" scripts/initialize-edge-first-boot.sh
+grep -q 'systemctl restart avahi-daemon.service' scripts/initialize-edge-first-boot.sh

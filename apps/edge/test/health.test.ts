@@ -9,7 +9,7 @@ describe("Edge health", () => {
     expect(["healthy", "degraded", "unhealthy"]).toContain(
       result.status,
     );
-    expect(result.version).toBe("0.1.0");
+    expect(result.version).toBe("0.2.0");
     expect(typeof result.claimed).toBe("boolean");
     expect(result.setupId).toMatch(/^[A-F0-9]{6}$/);
     expect(Number.isNaN(Date.parse(result.timestamp))).toBe(false);

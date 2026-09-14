@@ -20,6 +20,13 @@ ssh-keygen -A
 sed -i '/^127\.0\.1\.1[[:space:]]/d' /etc/hosts
 printf '127.0.1.1 %s\n' "${CONTROLLER_HOSTNAME}" >> /etc/hosts
 
+# Avahi may already have expanded %h in the service name using the temporary
+# Raspberry Pi Imager hostname. Reload it after assigning the hardware-derived
+# identity so nearby-controller discovery immediately presents the final name.
+if systemctl is-active --quiet avahi-daemon.service; then
+  systemctl restart avahi-daemon.service
+fi
+
 if systemctl cat ssh.service >/dev/null 2>&1; then
   if [[ -s /home/admin/.ssh/authorized_keys ]]; then
     # Image preparation already records whether SSH is enabled. Do not run

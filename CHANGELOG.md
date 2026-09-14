@@ -23,6 +23,8 @@ developer preview.
 - Documented the Apache-2.0 source boundary and reserved modREEF branding.
 - Reconciled tablet and web clients around shared cloud contracts.
 - Hardened controller lifecycle, onboarding, deletion, and update behavior.
+- Aligned controller health and cloud reporting with the `0.2.0` release.
+- Made first-boot discovery immediately advertise the hardware-derived hostname.
 
 ### Security
 
@@ -30,6 +32,8 @@ developer preview.
   complete Gitleaks ruleset.
 - Controller updates are checksum-verified and, once the trust anchor is
   installed, require a valid Ed25519 signature.
+- Community image builds now fail if their embedded source provenance is absent
+  or malformed.
 
 ## 0.1.0 - 2026-08-28
 

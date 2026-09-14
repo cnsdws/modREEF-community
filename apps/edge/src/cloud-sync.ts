@@ -54,6 +54,7 @@ import {
   setControllerReleaseChannel,
   type ControllerReleaseChannel,
 } from "./controller-update.js";
+import { controllerSoftwareVersion } from "./software-version.js";
 import { isWaterProbeCalibration } from "@modreef/driver-yinmik-water";
 import {
   getPublicEquipmentSnapshot,
@@ -383,7 +384,7 @@ export class EdgeCloudSync {
       const response = await this.transport.exchange({
         edgeId: this.config.edgeId,
         aquariumId: this.config.aquariumId,
-        softwareVersion: "0.1.0",
+        softwareVersion: controllerSoftwareVersion,
         uptimeSeconds: this.dependencies.uptimeSeconds(),
         localHostname: hostname(),
         ...(localAddress ? { localAddress } : {}),
