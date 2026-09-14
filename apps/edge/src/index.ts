@@ -26,6 +26,7 @@ import {
 import { verifyCloudLocalAuthorization } from "./cloud-local-authorization.js";
 import { controllerClaimSecretMatches } from "./controller-claim-secret.js";
 import { deriveControllerSetupId } from "./controller-setup-id.js";
+import { controllerSoftwareVersion } from "./software-version.js";
 
 const port = Number(process.env.MODREEF_PORT ?? 3000);
 const startedAt = Date.now();
@@ -141,7 +142,7 @@ export function createHealthResponse() {
 
   return {
     name: "modREEF Edge",
-    version: "0.1.0",
+    version: controllerSoftwareVersion,
     status: health.status,
     checks: health.checks,
     hostname: hostname(),

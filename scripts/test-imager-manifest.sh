@@ -56,4 +56,10 @@ grep -Fq 'users: []' \
   "${REPOSITORY_ROOT}/image/pi-gen/stage-modreef/00-install-modreef/00-run.sh"
 grep -Fq 'ssh_pwauth: false' \
   "${REPOSITORY_ROOT}/image/pi-gen/stage-modreef/00-install-modreef/00-run.sh"
+grep -Fq "export MODREEF_SOURCE_COMMIT='\${SOURCE_COMMIT}'" \
+  "${REPOSITORY_ROOT}/scripts/build-community-image.sh"
+grep -Fq 'The community image source commit is missing or invalid.' \
+  "${REPOSITORY_ROOT}/image/pi-gen/stage-modreef/00-install-modreef/00-run.sh"
+grep -Fq '"softwareVersion": "${SOFTWARE_VERSION}"' \
+  "${REPOSITORY_ROOT}/image/pi-gen/stage-modreef/00-install-modreef/00-run.sh"
 echo "Raspberry Pi Imager manifest generation passed."
