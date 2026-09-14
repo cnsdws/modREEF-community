@@ -13,9 +13,9 @@
     "@modreef/discovery": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^6.0.3",
-    "vitest": "^3.2.7",
-    "@types/node": "^22.0.0"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0",
+    "@types/node": "^26.5.1"
   },
   "exports": {
     ".": "./src/index.ts"
