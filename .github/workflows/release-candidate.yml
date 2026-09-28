@@ -42,7 +42,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm --filter @modreef/mobile export:web
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - name: Build production Cloud API image
         uses: docker/build-push-action@v6
         with:
