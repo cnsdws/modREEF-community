@@ -28,7 +28,7 @@
     "@modreef/inspection": "workspace:*",
     "@modreef/onboarding": "workspace:*",
     "@modreef/storage-sqlite": "workspace:*",
-    "@stoprocent/bleno": "^0.12.5"
+    "@stoprocent/bleno": "^0.13.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
